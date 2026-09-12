@@ -1,0 +1,169 @@
+"""Pydantic request/response schemas for the Storeye FastAPI API.
+
+These define the API contract. Database/ORM models are NEVER exposed
+directly; the API layer maps to/from these schemas.
+"""
+
+from .store import StoreCreate, StoreRead, StoreUpdate, StoreList
+from .user import UserCreate, UserRead, UserUpdate, UserList
+from .camera import CameraCreate, CameraRead, CameraUpdate, CameraList
+from .zone import ZoneCreate, ZoneRead, ZoneUpdate, ZoneList
+from .shelf import ShelfCreate, ShelfRead, ShelfUpdate, ShelfList
+from .product import ProductCreate, ProductRead, ProductUpdate, ProductList
+from .batch import BatchCreate, BatchRead, BatchUpdate, BatchList
+from .inventory import (
+    AdjustStockIn,
+    InventoryMovementList,
+    InventoryMovementRead,
+    InventoryRead,
+    InventorySetReorder,
+    InventorySummaryRead,
+    ReceiveStockIn,
+    RecordMovementIn,
+)
+from .customer import CustomerCreate, CustomerRead, CustomerUpdate, CustomerList
+from .sale import SaleCreate, SaleItemCreate, SaleItemRead, SaleList, SaleRead
+from .bill import (
+    BillCreate,
+    BillItemCreate,
+    BillItemRead,
+    BillList,
+    BillRead,
+    BillUpdate,
+)
+from .notification import (
+    NotificationCreate,
+    NotificationList,
+    NotificationRead,
+    NotificationUpdate,
+)
+from .alert import (
+    AlertCreate,
+    AlertEvaluateIn,
+    AlertEvaluateResult,
+    AlertList,
+    AlertRead,
+    AlertUpdate,
+)
+from .observation import (
+    ActivityBucket,
+    ObservationCreate,
+    ObservationList,
+    ObservationRead,
+    ObservationSummary,
+)
+from .reconciliation import (
+    ReconciliationResultList,
+    ReconciliationResultRead,
+    ReconciliationRunIn,
+)
+from .batch_intake import (
+    BatchConfirmIn,
+    BatchReceiptRead,
+    BatchScanCandidateRead,
+    BatchScanRead,
+)
+from .intelligence import (
+    AISummaryRead,
+    CameraSummaryRead,
+    MisplacementList,
+    MisplacementRead,
+    PeopleSummaryRead,
+    ProductIntelligenceList,
+    ProductIntelligenceRead,
+    ProductSummaryRead,
+    ReconciliationSummaryRead,
+    ShelfIntelligenceList,
+    ShelfIntelligenceRead,
+    ShelfSummaryRead,
+    ShelfVisibleProductRead,
+)
+
+__all__ = [
+    "StoreCreate",
+    "StoreRead",
+    "StoreUpdate",
+    "StoreList",
+    "UserCreate",
+    "UserRead",
+    "UserUpdate",
+    "UserList",
+    "CameraCreate",
+    "CameraRead",
+    "CameraUpdate",
+    "CameraList",
+    "ZoneCreate",
+    "ZoneRead",
+    "ZoneUpdate",
+    "ZoneList",
+    "ShelfCreate",
+    "ShelfRead",
+    "ShelfUpdate",
+    "ShelfList",
+    "ProductCreate",
+    "ProductRead",
+    "ProductUpdate",
+    "ProductList",
+    "BatchCreate",
+    "BatchRead",
+    "BatchUpdate",
+    "BatchList",
+    "AdjustStockIn",
+    "InventoryMovementList",
+    "InventoryMovementRead",
+    "InventoryRead",
+    "InventorySetReorder",
+    "InventorySummaryRead",
+    "ReceiveStockIn",
+    "RecordMovementIn",
+    "CustomerCreate",
+    "CustomerRead",
+    "CustomerUpdate",
+    "CustomerList",
+    "SaleCreate",
+    "SaleItemCreate",
+    "SaleItemRead",
+    "SaleList",
+    "SaleRead",
+    "BillCreate",
+    "BillItemCreate",
+    "BillItemRead",
+    "BillList",
+    "BillRead",
+    "BillUpdate",
+    "NotificationCreate",
+    "NotificationList",
+    "NotificationRead",
+    "NotificationUpdate",
+    "AlertCreate",
+    "AlertEvaluateIn",
+    "AlertEvaluateResult",
+    "AlertList",
+    "AlertRead",
+    "AlertUpdate",
+    "ObservationCreate",
+    "ObservationList",
+    "ObservationRead",
+    "ObservationSummary",
+    "ActivityBucket",
+    "ReconciliationResultList",
+    "ReconciliationResultRead",
+    "ReconciliationRunIn",
+    "BatchConfirmIn",
+    "BatchReceiptRead",
+    "BatchScanCandidateRead",
+    "BatchScanRead",
+    "AISummaryRead",
+    "CameraSummaryRead",
+    "MisplacementList",
+    "MisplacementRead",
+    "PeopleSummaryRead",
+    "ProductSummaryRead",
+    "ProductIntelligenceList",
+    "ProductIntelligenceRead",
+    "ReconciliationSummaryRead",
+    "ShelfIntelligenceList",
+    "ShelfIntelligenceRead",
+    "ShelfSummaryRead",
+    "ShelfVisibleProductRead",
+]

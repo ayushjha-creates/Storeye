@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-surface-100 font-sans text-gray-500 antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+    background-color: #0a0f1c;
+    background-image:
+      radial-gradient(1000px 640px at 100% -12%, rgb(59 130 246 / 0.09), transparent 60%),
+      radial-gradient(820px 520px at -8% 108%, rgb(139 92 246 / 0.07), transparent 55%),
+      radial-gradient(rgb(148 163 184 / 0.05) 1px, transparent 1px);
+    background-size: auto, auto, 28px 28px;
+    background-attachment: fixed;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-bold tracking-tight text-gray-100;
+  }
+  h1 {
+    font-size: clamp(1.35rem, 1rem + 2vw, 1.8rem);
+  }
+  h2 {
+    font-size: clamp(1rem, 0.9rem + 0.6vw, 1.15rem);
+  }
+  a {
+    @apply text-brand-400 transition-colors hover:text-brand-300;
+  }
+}
+
+@layer components {
+  .page-shell {
+    @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8;
+    animation: page-in 260ms ease-out;
+  }
+  .card {
+    @apply rounded-card border border-white/[0.07] bg-surface-200 shadow-soft;
+  }
+  .card-hover {
+    @apply transition-all duration-200 hover:-translate-y-px hover:border-white/[0.12] hover:shadow-lift;
+  }
+  .surface-alt {
+    @apply rounded-xl border border-white/[0.06] bg-white/[0.03];
+  }
+  .table-base th {
+    @apply bg-transparent px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-400;
+  }
+  .table-base td {
+    @apply px-4 py-2.5 text-sm text-gray-400;
+  }
+  .table-base thead tr {
+    @apply border-b border-white/[0.07];
+  }
+  .table-base tbody tr {
+    @apply border-b border-white/[0.04] transition-colors last:border-0;
+  }
+  .table-base tbody tr:hover {
+    @apply bg-white/[0.03];
+  }
+  .table-base tbody tr:hover td {
+    @apply text-gray-300;
+  }
+  /* Primary CTA button */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-brand-500 hover:shadow-glow disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500;
+  }
+  /* Secondary — dark surface with thin border */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-gray-200 transition-all duration-200 hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .text-accent-gradient {
+    @apply bg-gradient-to-r from-brand-400 via-brand-300 to-cyan-300 bg-clip-text text-transparent;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-gray-700;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-600;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .skeleton {
+    @apply relative overflow-hidden rounded-lg bg-white/[0.05];
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/[0.06] to-transparent;
+  }
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

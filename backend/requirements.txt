@@ -1,0 +1,24 @@
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29,<1.0
+pydantic>=2.7,<3.0
+pydantic-settings>=2.2,<3.0
+sqlmodel>=0.0.16,<1.0
+sqlalchemy>=2.0,<3.0
+python-multipart>=0.0.9
+
+# PostgreSQL data layer (Storeye business entities)
+alembic>=1.13,<2.0
+psycopg2-binary>=2.9,<3.0
+
+# Computer vision
+ultralytics>=8.3,<9.0
+opencv-python>=4.10,<5.0
+numpy>=1.24,<2.0
+lap>=0.5.12  # required by Ultralytics ByteTrack tracker
+
+# OCR (PaddleOCR 3.x, PaddleX-based)
+paddleocr>=3.7,<4.0
+paddlepaddle>=3.0,<4.0
+
+# Barcode decoding (local, offline) — requires system libzbar (brew install zbar)
+pyzbar>=0.1.9

@@ -109,7 +109,7 @@ export function InventoryPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-bold">Inventory</h1>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             Stock is updated ONLY through FastAPI domain services (receive /
             adjust / batch). All mutations are atomic.
           </p>

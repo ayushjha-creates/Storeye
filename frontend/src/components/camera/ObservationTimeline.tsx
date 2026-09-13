@@ -95,7 +95,7 @@ export function ObservationTimeline({
           hint="Adjust the filters, or run the Edge AI runtime to start recording detections."
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-white/[0.07] bg-surface-200">
+        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-surface-200">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
               <tr className="border-b border-gray-100 text-xs uppercase tracking-wide text-gray-400">

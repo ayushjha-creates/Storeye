@@ -105,7 +105,7 @@ export function AlertsPage() {
           <div className="flex items-center gap-2">
             <h1 className="font-bold">Alerts</h1>
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             Actionable intelligence derived from existing AI results.{' '}
             <span className="font-medium">Informational only</span> — alerts never change
             stock; they ask a human to review.

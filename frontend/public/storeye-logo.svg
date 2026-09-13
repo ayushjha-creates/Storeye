@@ -1,22 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 300">
-  <defs>
-    <linearGradient id="bgGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1E2A5A"/>
-      <stop offset="100%" stop-color="#152047"/>
-    </linearGradient>
-  </defs>
-  <rect x="20" y="40" width="220" height="220" rx="48" fill="url(#bgGrad2)"/>
-  <g transform="translate(30,48)">
-    
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220">
+  <g transform="translate(10,8)">
     <g>
-      <!-- cart handle -->
-      <path d="M28,58 L45,58 Q54,58 57,67 L64,90" fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-      <!-- basket -->
-      <path d="M64,90 L166,90 L150,150 L82,150 Z" fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/>
-      <!-- wheels -->
-      <circle cx="93" cy="180" r="11" fill="#FFFFFF"/>
-      <circle cx="140" cy="180" r="11" fill="#FFFFFF"/>
-      <!-- eye, nested inside the basket -->
+      <path d="M28,58 L45,58 Q54,58 57,67 L64,90" fill="none" stroke="#1E2A5A" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M64,90 L166,90 L150,150 L82,150 Z" fill="none" stroke="#1E2A5A" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="93" cy="180" r="11" fill="#1E2A5A"/>
+      <circle cx="140" cy="180" r="11" fill="#1E2A5A"/>
       <path d="M84,120 Q116,100 148,120 Q116,140 84,120 Z" fill="#FFFFFF"/>
       <path d="M84,120 Q116,100 148,120 Q116,140 84,120 Z" fill="none" stroke="#1E2A5A" stroke-width="4" stroke-linejoin="round"/>
       <circle cx="116" cy="120" r="13.5" fill="#F5B92E" stroke="#1E2A5A" stroke-width="3"/>
@@ -24,8 +12,4 @@
       <circle cx="120.5" cy="115.5" r="2.4" fill="#FFFFFF"/>
     </g>
   </g>
-  <text x="290" y="168" font-family="Poppins" font-weight="700" font-size="108" letter-spacing="1">
-    <tspan fill="#1E2A5A">stor</tspan><tspan fill="#D99A12">eye</tspan>
-  </text>
-  <text x="292" y="220" font-family="Poppins" font-weight="500" font-style="italic" font-size="34" fill="#5B6478" letter-spacing="0.5">See Smarter. Run Better.</text>
 </svg>

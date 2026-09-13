@@ -100,7 +100,7 @@ export function ObservationsPage() {
             <IconActivity className="h-5 w-5 text-brand-600" />
             <h1 className="font-bold">AI Observations</h1>
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             Detections recorded by the local Edge AI runtime — observations never change
             inventory automatically.
           </p>

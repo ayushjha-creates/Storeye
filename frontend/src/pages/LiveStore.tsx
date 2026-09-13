@@ -134,7 +134,7 @@ export function LiveStorePage() {
           <div className="flex items-center gap-2.5">
             <h1 className="font-bold">Live Store</h1>
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             {store ? cleanName(store.name) : 'Loading store…'} ·{' '}
             {edgeOnline ? 'Streaming from the Edge AI runtime' : 'Showing last known good data'}
           </p>
@@ -143,7 +143,7 @@ export function LiveStorePage() {
           {lastUpdated && <span className="text-xs text-gray-400">Refreshed {lastUpdated.toLocaleTimeString()}</span>}
           <button
             onClick={load}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/[0.08] hover:text-white"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900"
           >
             <IconRefresh className="h-3.5 w-3.5" /> Refresh
           </button>

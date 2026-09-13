@@ -100,7 +100,7 @@ export function ReconciliationPage() {
             <IconScan className="h-5 w-5 text-brand-600" />
             <h1 className="font-bold">Reconciliation</h1>
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             AI observed vs database stock. Informational only — inventory is never
             auto-corrected.
           </p>

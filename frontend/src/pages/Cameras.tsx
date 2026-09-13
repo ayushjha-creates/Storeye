@@ -117,7 +117,7 @@ export function CamerasPage() {
             <IconCamera className="h-5 w-5 text-brand-600" />
             <h1 className="font-bold">Cameras</h1>
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             Edge AI camera feeds — processed locally, never uploaded to the cloud
           </p>
         </div>
@@ -146,10 +146,10 @@ export function CamerasPage() {
                   <Link
                     key={c.id}
                     to={`/app/cameras/${c.id}`}
-                    className="group flex flex-col rounded-xl border border-white/[0.07] bg-surface-200 p-4 shadow-soft transition-all duration-200 hover:-translate-y-px hover:border-brand-500/40 hover:shadow-lift"
+                    className="group flex flex-col rounded-xl border border-gray-200 bg-surface-200 p-4 shadow-sm transition-all duration-200 hover:-translate-y-px hover:border-brand-500/40 hover:shadow-md"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="truncate font-medium text-gray-100 group-hover:text-brand-700">
+                      <p className="truncate font-medium text-gray-900 group-hover:text-brand-700">
                         {c.name}
                       </p>
                       <Badge tone={health.tone}>{health.label}</Badge>
@@ -182,7 +182,7 @@ export function CamerasPage() {
                     </div>
 
                     {edge?.error ? (
-                      <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-1.5 text-[11px] text-red-300">
+                      <p className="mt-2 rounded-lg bg-red-50 px-3 py-1.5 text-[11px] text-red-600">
                         {edge.error}
                       </p>
                     ) : null}

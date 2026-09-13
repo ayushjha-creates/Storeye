@@ -16,9 +16,9 @@ export function Card({
   return (
     <section className={`card overflow-hidden ${className}`}>
       {(title || action) && (
-        <header className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+        <header className="flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4">
           <div>
-            {title && <h2 className="text-sm font-semibold tracking-tight text-gray-100">{title}</h2>}
+            {title && <h2 className="text-sm font-semibold tracking-tight text-gray-900">{title}</h2>}
             {subtitle && <p className="mt-0.5 text-xs text-gray-500">{subtitle}</p>}
           </div>
           {action && <div className="shrink-0">{action}</div>}
@@ -32,19 +32,19 @@ export function Card({
 export type StatTone = 'default' | 'positive' | 'warning' | 'danger' | 'brand'
 
 const valueTone: Record<StatTone, string> = {
-  default: 'text-gray-100',
-  positive: 'text-emerald-400',
-  warning: 'text-amber-400',
-  danger: 'text-red-400',
-  brand: 'text-brand-400',
+  default: 'text-gray-900',
+  positive: 'text-emerald-600',
+  warning: 'text-amber-600',
+  danger: 'text-red-600',
+  brand: 'text-brand-700',
 }
 
 const chipTone: Record<StatTone, string> = {
-  default: 'bg-white/[0.04] ring-white/[0.08]',
-  positive: 'bg-emerald-500/10 ring-emerald-500/20',
-  warning: 'bg-amber-500/10 ring-amber-500/20',
-  danger: 'bg-red-500/10 ring-red-500/20',
-  brand: 'bg-brand-500/10 ring-brand-500/25',
+  default: 'bg-gray-100 ring-gray-200',
+  positive: 'bg-emerald-50 ring-emerald-200',
+  warning: 'bg-amber-50 ring-amber-200',
+  danger: 'bg-red-50 ring-red-200',
+  brand: 'bg-brand-50 ring-brand-200',
 }
 
 function useCountUp(target: number, enabled: boolean): number {
@@ -123,12 +123,12 @@ export function PageHeader({
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
         {eyebrow && (
-          <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-400">{eyebrow}</p>
+          <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-white">{eyebrow}</p>
         )}
         <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="font-bold">{title}</h1>
+          <h1 className="font-bold !text-black">{title}</h1>
         </div>
-        {description && <p className="mt-1 text-sm text-gray-500">{description}</p>}
+        {description && <p className="mt-1 text-sm text-black/70">{description}</p>}
       </div>
       {trailing && <div className="flex shrink-0 flex-wrap items-center gap-3">{trailing}</div>}
     </div>

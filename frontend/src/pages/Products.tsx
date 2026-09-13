@@ -93,7 +93,7 @@ export function ProductsPage() {
             </span>
             <h1 className="font-bold">Products</h1>
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             Catalogue of SKUs. Products are sold manually via POS/billing; AI
             observations reference them but never change their prices.
           </p>

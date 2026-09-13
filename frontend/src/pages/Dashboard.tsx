@@ -295,7 +295,6 @@ export function DashboardPage() {
             {store ? cleanName(store.name) : 'Storeye Dashboard'}
           </>
         }
-        description="Edge AI Retail Intelligence · local & offline-capable"
         trailing={
           <>
             <span className="hidden text-xs text-gray-500 sm:block">
@@ -335,7 +334,16 @@ export function DashboardPage() {
                 <EmptyState title="No sales yet" hint="Create a bill to start the trend." />
               ) : (
                 <>
-                  <LineChart values={saleBuckets} labels={last7DayLabels()} color="#3b82f6" height={150} />
+                  <div className="overflow-hidden rounded-xl border border-gray-200 bg-white px-3 py-4">
+                    <LineChart
+                      values={saleBuckets}
+                      labels={last7DayLabels()}
+                      color="#3b82f6"
+                      dotStroke="#3b82f6"
+                      lineShadowY={3}
+                      height={150}
+                    />
+                  </div>
                   <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
                     <span className="inline-flex items-center gap-1">
                       <IconTrendUp className="h-3.5 w-3.5 text-emerald-600" />

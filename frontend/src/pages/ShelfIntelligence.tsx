@@ -99,7 +99,7 @@ export function ShelfIntelligencePage() {
           </span>
           <h1 className="font-bold">Shelf Intelligence</h1>
         </div>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-black">
           AI-estimated visible occupancy per configured shelf region. This is{' '}
           <span className="font-medium">not stock</span> — it reflects what the camera
           currently sees.
@@ -163,7 +163,7 @@ export function ShelfIntelligencePage() {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <h3 className="text-sm font-semibold text-gray-100">
+                          <h3 className="text-sm font-semibold">
                             {r.region_label ?? `Shelf ${r.shelf_code}`}
                           </h3>
                           <p className="text-xs text-gray-500">

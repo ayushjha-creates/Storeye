@@ -65,7 +65,7 @@ export function DetectionStats({ camera, edge, summary }: DetectionStatsProps) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-white/[0.07] bg-surface-200 shadow-soft">
+      <div className="rounded-xl border border-gray-200 bg-surface-200 shadow-sm">
         <header className="border-b border-gray-100 px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
             Detection statistics
@@ -106,14 +106,14 @@ export function DetectionStats({ camera, edge, summary }: DetectionStatsProps) {
         </div>
 
         {!productDetectionEnabled && (
-          <p className="border-t border-white/[0.06] bg-amber-500/10 px-4 py-2 text-xs text-amber-300">
+          <p className="border-t border-gray-200 bg-amber-50 px-4 py-2 text-xs text-amber-700">
             Product detection is not enabled for this camera — product counters stay at 0 until it
             is turned on in the camera config.
           </p>
         )}
       </div>
 
-      <div className="rounded-xl border border-white/[0.07] bg-surface-200 shadow-soft">
+      <div className="rounded-xl border border-gray-200 bg-surface-200 shadow-sm">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 px-4 py-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
@@ -138,7 +138,7 @@ export function DetectionStats({ camera, edge, summary }: DetectionStatsProps) {
         ) : (
           <>
             {edge.error ? (
-              <p className="border-b border-white/[0.06] bg-red-500/10 px-4 py-2 text-xs text-red-300">
+              <p className="border-b border-gray-200 bg-red-50 px-4 py-2 text-xs text-red-600">
                 {edge.error}
               </p>
             ) : null}

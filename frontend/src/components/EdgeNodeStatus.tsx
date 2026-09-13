@@ -53,18 +53,18 @@ export function EdgeNodeStatus({ compact = false }: { compact?: boolean }) {
 
   if (compact) {
     return (
-      <div className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5">
+      <div className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-1.5">
         <span
           className={`inline-block h-2 w-2 rounded-full ${
-            status.edgeOnline ? 'bg-emerald-400 shadow-[0_0_6px_1px_rgb(52_211_153/0.45)]' : 'bg-red-400'
+            status.edgeOnline ? 'bg-emerald-500 shadow-[0_0_6px_1px_rgb(16_185_129/0.45)]' : 'bg-red-500'
           }`}
           aria-hidden="true"
         />
-        <span className="text-xs font-medium text-gray-300">
+        <span className="text-xs font-medium text-gray-700">
           {status.edgeOnline ? 'EDGE ONLINE' : 'EDGE OFFLINE'}
         </span>
         {!status.internetOnline && (
-          <span className="rounded bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+          <span className="rounded bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
             INTERNET OFFLINE — NORMAL
           </span>
         )}
@@ -140,7 +140,7 @@ export function EdgeNodeStatus({ compact = false }: { compact?: boolean }) {
         />
       </div>
       {!status.internetOnline && status.edgeOnline && (
-        <div className="border-t border-white/[0.06] bg-emerald-500/10 px-4 py-2 text-xs text-emerald-300">
+        <div className="border-t border-gray-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-700">
           <span className="font-semibold uppercase tracking-wide">Edge Mode</span> — cameras, AI
           and PostgreSQL all run on this local node; internet is never required. This is normal
           operation.

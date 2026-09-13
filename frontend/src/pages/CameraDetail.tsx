@@ -170,7 +170,7 @@ export function CameraDetailPage() {
             <IconCamera className="h-5 w-5 text-brand-600" />
             <h1 className="font-bold">{camera.name}</h1>
           </div>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-black">
             {camera.location ?? 'Location not set'} · {camera.camera_type}
           </p>
         </div>
@@ -220,7 +220,7 @@ export function CameraDetailPage() {
                     className={`px-3 py-1.5 transition-colors ${
                       streamMode === 'ai'
                         ? 'bg-brand-600 text-white'
-                        : 'bg-white/[0.04] text-gray-300 hover:bg-white/[0.08]'
+                        : 'bg-white text-gray-500 hover:bg-gray-50'
                     }`}
                   >
                     AI ANNOTATED
@@ -233,7 +233,7 @@ export function CameraDetailPage() {
                     className={`px-3 py-1.5 transition-colors ${
                       streamMode === 'raw'
                         ? 'bg-brand-600 text-white'
-                        : 'bg-white/[0.04] text-gray-300 hover:bg-white/[0.08]'
+                        : 'bg-white text-gray-500 hover:bg-gray-50'
                     }`}
                   >
                     RAW

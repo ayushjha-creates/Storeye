@@ -58,7 +58,7 @@ export function AnalysisPanel({
   }
 
   return (
-    <div className="rounded-xl border border-white/[0.07] bg-surface-200 shadow-soft">
+    <div className="rounded-xl border border-gray-200 bg-surface-200 shadow-sm">
       <header className="border-b border-gray-100 px-4 py-3">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
           {cameraName ? 'AI ANALYSIS' : 'AI ANALYSIS'}

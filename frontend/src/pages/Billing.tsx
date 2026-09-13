@@ -147,7 +147,7 @@ export function BillingPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-bold">Billing</h1>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             Manual billing only — the shopkeeper creates each bill. There is no
             AI-generated billing, and a bill never auto-changes inventory.
           </p>

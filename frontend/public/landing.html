@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Storeye — Run your store smarter, even fully offline</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --brand-blue: #22b6e0;
+        --brand-green: #2ecf7a;
+        --ink: #0f172a;
+        --body-gray: #64748b;
+        --bg-white: #ffffff;
+        --cta-gradient: linear-gradient(90deg, #3b82f6, #22c55e);
+        --radius-sm: 8px;
+        --radius-lg: 16px;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        background-color: var(--bg-white);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .container {
+        max-width: 1440px;
+        margin: 0 auto;
+        padding-left: 64px;
+        padding-right: 64px;
+      }
+
+      /* ===== NAVBAR ===== */
+      .navbar {
+        position: sticky;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 50;
+        height: 80px;
+        background-color: var(--bg-white);
+        border-bottom: 1px solid #eef1f4;
+      }
+
+      .navbar .container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 80px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+      }
+
+      .brand-wordmark {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .brand-wordmark .store {
+        color: var(--ink);
+      }
+
+      .brand-wordmark .ye {
+        background: linear-gradient(90deg, var(--brand-blue), var(--brand-green));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 32px;
+      }
+
+      .nav-links a {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--ink);
+        text-decoration: none;
+        transition: color 0.15s ease;
+      }
+
+      .nav-links a:hover {
+        color: var(--brand-blue);
+      }
+
+      .nav-cta {
+        margin-left: 32px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: none;
+        border-radius: 999px;
+        background: var(--cta-gradient);
+        color: #ffffff;
+        font-family: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-pill-sm {
+        padding: 10px 20px;
+        font-size: 14px;
+      }
+
+      .nav-toggle {
+        display: none;
+        background: none;
+        border: none;
+        padding: 6px;
+        cursor: pointer;
+      }
+
+      .nav-toggle span {
+        display: block;
+        width: 22px;
+        height: 2px;
+        background: var(--ink);
+        margin: 5px 0;
+        border-radius: 2px;
+      }
+
+      /* ===== HERO ===== */
+      .hero {
+        min-height: 90vh;
+        padding: 40px 0;
+        display: flex;
+        align-items: center;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: 45% 55%;
+        align-items: center;
+        width: 100%;
+      }
+
+      .hero-copy {
+        padding-left: 48px;
+        text-align: left;
+      }
+
+      .hero-logo {
+        margin-bottom: 28px;
+      }
+
+      .hero-logo svg {
+        display: block;
+        width: 40px;
+        height: 40px;
+      }
+
+      .hero-title {
+        font-size: 56px;
+        font-weight: 800;
+        line-height: 1.1;
+        letter-spacing: -0.03em;
+        color: var(--ink);
+      }
+
+      .hero-title .accent {
+        background: linear-gradient(90deg, var(--brand-blue), var(--brand-green));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .hero-subtitle {
+        margin-top: 20px;
+        font-size: 18px;
+        font-weight: 400;
+        line-height: 1.6;
+        color: var(--body-gray);
+        max-width: 480px;
+      }
+
+      .feature-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 24px;
+        margin-top: 36px;
+      }
+
+      .feature-item {
+        text-align: left;
+      }
+
+      .feature-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: #e8f7fd;
+        color: var(--brand-blue);
+      }
+
+      .feature-icon.icon-green {
+        background: #e7f9ef;
+        color: var(--brand-green);
+      }
+
+      .feature-label {
+        margin-top: 10px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--ink);
+        line-height: 1.35;
+      }
+
+      .hero-cta {
+        margin-top: 36px;
+      }
+
+      .btn-hero {
+        padding: 16px 32px;
+        font-size: 16px;
+        box-shadow: 0 8px 24px rgba(34, 197, 94, 0.25);
+      }
+
+      .btn-hero .arrow {
+        font-size: 18px;
+        line-height: 1;
+      }
+
+      /* ===== HERO RIGHT (55%) ===== */
+      .hero-visual {
+        position: relative;
+        align-self: stretch;
+        min-height: 620px;
+        overflow: hidden;
+        /* Bleed to the container edge: no right/top/bottom padding */
+        margin: -40px -64px -40px 0;
+      }
+
+      .hero-store {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .hero-devices {
+        position: relative;
+        z-index: 1;
+        display: block;
+        width: 86%;
+        max-width: 100%;
+        height: auto;
+        margin: 0 auto;
+        object-fit: contain;
+      }
+
+      .hero-fade {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 60%;
+        z-index: 2;
+        pointer-events: none;
+        background: linear-gradient(
+          100deg,
+          #fff 0%,
+          rgba(255, 255, 255, 0.4) 30%,
+          rgba(255, 255, 255, 0) 55%
+        );
+      }
+
+      /* ===== RESPONSIVE ===== */
+      @media (max-width: 1024px) {
+        .container {
+          padding-left: 32px;
+          padding-right: 32px;
+        }
+
+        .hero {
+          padding: 60px 0;
+        }
+
+        .hero-grid {
+          grid-template-columns: 1fr;
+          gap: 48px;
+        }
+
+        .hero-copy {
+          padding-left: 0;
+          text-align: left;
+        }
+
+        .hero-visual {
+          order: 2;
+          margin: 0;
+          min-height: 0;
+          align-self: auto;
+        }
+
+        .hero-devices {
+          width: 100%;
+        }
+
+        .hero-fade {
+          width: 55%;
+        }
+
+        .hero-title {
+          font-size: 36px;
+        }
+
+        .feature-row {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 640px) {
+        .nav-links {
+          display: none;
+          position: absolute;
+          top: 80px;
+          left: 0;
+          right: 0;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 20px;
+          background: var(--bg-white);
+          border-bottom: 1px solid #eef1f4;
+          padding: 24px 32px;
+        }
+
+        .nav-links.open {
+          display: flex;
+        }
+
+        .nav-cta {
+          margin-left: 0;
+        }
+
+        .nav-cta .btn-pill-sm {
+          width: 100%;
+        }
+
+        .nav-toggle {
+          display: block;
+        }
+
+        .nav-right {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          margin-left: auto;
+        }
+
+        .container {
+          padding-left: 20px;
+          padding-right: 20px;
+        }
+
+        .hero-cta .btn-hero {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ===== NAVBAR ===== -->
+    <header class="navbar">
+      <div class="container">
+        <a class="brand" href="#">
+          <svg width="34" height="34" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="navCartGrad" x1="0" y1="0" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#22b6e0" />
+                <stop offset="1" stop-color="#2ecf7a" />
+              </linearGradient>
+            </defs>
+            <g stroke="url(#navCartGrad)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M48,96 L68,96 Q80,96 84,108 L94,140" fill="none" />
+              <path d="M94,140 L214,140 L196,214 L112,214 Z" fill="none" />
+            </g>
+            <circle cx="136" cy="244" r="14" fill="url(#navCartGrad)" />
+            <circle cx="172" cy="244" r="14" fill="url(#navCartGrad)" />
+          </svg>
+          <span class="brand-wordmark"><span class="store">Stor</span><span class="ye">eye</span></span>
+        </a>
+        <nav class="nav-links" id="navLinks">
+          <a href="#product">Product</a>
+          <a href="#features">Features</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#docs">Docs</a>
+          <div class="nav-cta">
+            <a href="#" class="btn btn-pill-sm">Get Started</a>
+          </div>
+        </nav>
+        <button class="nav-toggle" id="navToggle" aria-label="Menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ===== HERO ===== -->
+    <section class="hero">
+      <div class="container hero-grid">
+        <!-- LEFT: 45% copy -->
+        <div class="hero-copy">
+          <div class="hero-logo">
+            <svg width="40" height="40" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="heroLogoGrad" x1="0" y1="0" x2="220" y2="220" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#22b6e0" />
+                  <stop offset="1" stop-color="#2ecf7a" />
+                </linearGradient>
+              </defs>
+              <g stroke="url(#heroLogoGrad)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M48,96 L68,96 Q80,96 84,108 L94,140" fill="none" />
+                <path d="M94,140 L214,140 L196,214 L112,214 Z" fill="none" />
+              </g>
+              <circle cx="136" cy="244" r="14" fill="url(#heroLogoGrad)" />
+              <circle cx="172" cy="244" r="14" fill="url(#heroLogoGrad)" />
+            </svg>
+          </div>
+
+          <h1 class="hero-title">
+            Run your store<br />
+            <span class="accent">smarter — even</span><br />
+            fully offline.
+          </h1>
+
+          <p class="hero-subtitle">
+            Storeye turns cameras on your premises into real shelf, queue and revenue
+            intelligence. Everything is processed at the edge — your data never leaves
+            the building.
+          </p>
+
+          <div class="feature-row">
+            <div class="feature-item">
+              <div class="feature-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+                  <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                  <circle cx="12" cy="20" r="1" />
+                </svg>
+              </div>
+              <p class="feature-label">Edge online<br />offline is normal</p>
+            </div>
+            <div class="feature-item">
+              <div class="feature-icon icon-green">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </div>
+              <p class="feature-label">YOLO + ByteTrack<br />people &amp; shelf tracking</p>
+            </div>
+            <div class="feature-item">
+              <div class="feature-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2v20" />
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                </svg>
+              </div>
+              <p class="feature-label">GST + UPI + WhatsApp<br />billing-aware</p>
+            </div>
+            <div class="feature-item">
+              <div class="feature-icon icon-green">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                </svg>
+              </div>
+              <p class="feature-label">Reconciliation-first<br />humans confirm</p>
+            </div>
+          </div>
+
+          <div class="hero-cta">
+            <a href="#" class="btn btn-hero">
+              Start exploring <span class="arrow">-></span>
+            </a>
+          </div>
+        </div>
+
+        <!-- RIGHT: 55% visual (store photo to edge + devices + left fade) -->
+        <div class="hero-visual">
+          <img class="hero-store" src="/assets/hero-store.png" alt="" />
+          <img class="hero-devices" src="/assets/hero-devices.png" alt="Storeye on laptop and phone" />
+          <div class="hero-fade" aria-hidden="true"></div>
+        </div>
+      </div>
+    </section>
+
+    <script>
+      var toggle = document.getElementById('navToggle');
+      var links = document.getElementById('navLinks');
+      toggle.addEventListener('click', function () {
+        links.classList.toggle('open');
+      });
+    </script>
+  </body>
+</html>

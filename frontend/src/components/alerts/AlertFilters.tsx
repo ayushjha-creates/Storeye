@@ -30,7 +30,7 @@ export function AlertFilters({
         value={alertType}
         disabled={disabled}
         onChange={(e) => onChange({ alertType: e.target.value as AlertType | '' })}
-        className="w-44 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:text-gray-300"
+        className="w-44 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:text-gray-300"
       >
         <option value="">All alert types</option>
         {alertTypeOptions.map((t) => (
@@ -45,7 +45,7 @@ export function AlertFilters({
         value={severity}
         disabled={disabled}
         onChange={(e) => onChange({ severity: e.target.value as AlertSeverity | '' })}
-        className="w-32 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:text-gray-300"
+        className="w-32 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:text-gray-300"
       >
         <option value="">All severities</option>
         {ALERT_SEVERITY_ORDER.map((s) => (
@@ -60,7 +60,7 @@ export function AlertFilters({
         value={status}
         disabled={disabled}
         onChange={(e) => onChange({ status: e.target.value as AlertStatus | '' })}
-        className="w-36 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:text-gray-300"
+        className="w-36 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:border-brand-500 focus:outline-none disabled:text-gray-300"
       >
         <option value="">All statuses</option>
         {ALERT_STATUS_ORDER.map((s) => (

@@ -38,7 +38,7 @@ export function AlertCard({
   }
 
   return (
-    <article className="rounded-xl border border-white/[0.07] bg-surface-200 p-4 shadow-soft">
+    <article className="rounded-xl border border-gray-200 bg-surface-200 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-brand-700">
@@ -74,7 +74,7 @@ export function AlertCard({
             <button
               key={action}
               onClick={() => onAction(alert, action)}
-              className="rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-gray-200 hover:bg-white/[0.08] hover:text-white"
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900"
             >
               {label}
             </button>

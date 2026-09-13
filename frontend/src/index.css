@@ -42,39 +42,90 @@
     animation: page-in 260ms ease-out;
   }
   .card {
-    @apply rounded-card border border-white/[0.07] bg-surface-200 shadow-soft;
+    @apply rounded-card border border-gray-200 bg-surface-200 shadow-sm;
+    color: #1e3a8a;
   }
   .card-hover {
-    @apply transition-all duration-200 hover:-translate-y-px hover:border-white/[0.12] hover:shadow-lift;
+    @apply transition-all duration-200 hover:-translate-y-px hover:border-gray-300 hover:shadow-md;
+  }
+  /* Blue text inside the white boxes — remap the neutral grays to brand
+     blue, while semantic tones (amber/emerald/red…) keep their meaning. */
+  .card .text-gray-100,
+  .card .text-gray-200,
+  .card .text-gray-300,
+  .card .text-gray-400 {
+    @apply text-brand-400;
+  }
+  .card .text-gray-500 {
+    @apply text-brand-500;
+  }
+  .card .text-gray-600 {
+    @apply text-brand-600;
+  }
+  .card .text-gray-700 {
+    @apply text-brand-700;
+  }
+  .card .text-gray-800,
+  .card .text-gray-900 {
+    @apply text-brand-800;
+  }
+  .card input,
+  .card select,
+  .card textarea {
+    @apply text-brand-700;
+  }
+  .card .fill-gray-300,
+  .card .fill-gray-400,
+  .card .fill-gray-500,
+  .card .fill-gray-600 {
+    fill: #3b82f6;
+  }
+  .card .fill-gray-700,
+  .card .fill-gray-800,
+  .card .fill-gray-900 {
+    fill: #1e40af;
+  }
+  .card .btn-secondary {
+    @apply text-brand-700;
   }
   .surface-alt {
-    @apply rounded-xl border border-white/[0.06] bg-white/[0.03];
+    @apply rounded-xl border border-gray-200 bg-gray-50;
+  }
+  /* Page titles are black on the white workspace background;
+     section headings inside white cards keep the blue accent. */
+  .page-shell h1 {
+    @apply text-black;
+  }
+  .page-shell h2,
+  .page-shell h3,
+  .page-shell h4 {
+    @apply text-brand-800;
   }
   .table-base th {
-    @apply bg-transparent px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-400;
+    @apply bg-transparent px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500;
   }
   .table-base td {
-    @apply px-4 py-2.5 text-sm text-gray-400;
+    @apply px-4 py-2.5 text-sm text-gray-600;
   }
   .table-base thead tr {
-    @apply border-b border-white/[0.07];
+    @apply border-b border-gray-200;
   }
   .table-base tbody tr {
-    @apply border-b border-white/[0.04] transition-colors last:border-0;
+    @apply border-b border-gray-100 transition-colors last:border-0;
   }
   .table-base tbody tr:hover {
-    @apply bg-white/[0.03];
+    @apply bg-gray-50;
   }
   .table-base tbody tr:hover td {
-    @apply text-gray-300;
+    @apply text-gray-900;
   }
   /* Primary CTA button */
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-brand-500 hover:shadow-glow disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500;
   }
-  /* Secondary — dark surface with thin border */
+  /* Secondary — white surface with thin border */
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-medium text-gray-200 transition-all duration-200 hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-all duration-200 hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .text-accent-gradient {
     @apply bg-gradient-to-r from-brand-400 via-brand-300 to-cyan-300 bg-clip-text text-transparent;
@@ -82,6 +133,24 @@
 }
 
 @layer utilities {
+  .animate-nav-in {
+    animation: nav-in 0.5s ease-out both;
+  }
+  .animate-fade-up {
+    animation: fade-up 0.6s ease-out both;
+  }
+  .animate-gradient-x {
+    background-size: 200% auto;
+    animation: gradient-x 4s ease-in-out infinite;
+  }
+  .animate-headline {
+    background-image: linear-gradient(100deg, #2563eb 0%, #06b6d4 25%, #10b981 50%, #06b6d4 75%, #2563eb 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: gradient-x 5s ease-in-out infinite, glow-pulse 4s ease-in-out infinite;
+  }
   .scrollbar-thin::-webkit-scrollbar {
     height: 8px;
     width: 8px;
@@ -99,11 +168,55 @@
     font-variant-numeric: tabular-nums;
   }
   .skeleton {
-    @apply relative overflow-hidden rounded-lg bg-white/[0.05];
+    @apply relative overflow-hidden rounded-lg bg-gray-100;
   }
   .skeleton::after {
     content: '';
-    @apply absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/[0.06] to-transparent;
+    @apply absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-gray-200 to-transparent;
+  }
+}
+
+@keyframes nav-in {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes gradient-x {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 6px 16px rgb(37 99 235 / 0.25));
+  }
+  50% {
+    filter: drop-shadow(0 8px 24px rgb(16 185 129 / 0.45));
   }
 }
 

@@ -10,12 +10,6 @@ import React from 'react'
 const W = 320
 const PAD_X = 8
 
-function toPoints(values: number[], width: number, height: number, min: number, max: number) {
-  const span = max - min || 1
-  const step = values.length > 1 ? (width - PAD_X * 2) / (values.length - 1) : 0
-  return values.map((v, i) => [PAD_X + i * step, height - ((v - min) / span) * height] as const)
-}
-
 function fmt(v: number): string {
   if (v === 0) return '0'
   if (Math.abs(v) >= 1000) {
@@ -26,6 +20,31 @@ function fmt(v: number): string {
   return v.toFixed(1)
 }
 
+function niceCeil(v: number): number {
+  if (v <= 0) return 1
+  const exp = Math.pow(10, Math.floor(Math.log10(v)))
+  const f = v / exp
+  const nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10
+  return nice * exp
+}
+
+function smoothLine(pts: readonly (readonly [number, number])[]): string {
+  if (pts.length < 2) return pts.length ? `M${pts[0][0]},${pts[0][1]}` : ''
+  let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i]
+    const p1 = pts[i]
+    const p2 = pts[i + 1]
+    const p3 = pts[i + 2] ?? p2
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`
+  }
+  return d
+}
+
 export function LineChart({
   values,
   labels,
@@ -33,6 +52,12 @@ export function LineChart({
   height = 140,
   showDots = true,
   showValues = true,
+  valueTextClass = 'fill-gray-900 tabular',
+  labelTextClass = 'fill-gray-600',
+  labelBoxBorder = '#e5e7eb',
+  lineDash,
+  dotStroke,
+  lineShadowY,
 }: {
   values: number[]
   labels?: string[]
@@ -40,78 +65,164 @@ export function LineChart({
   height?: number
   showDots?: boolean
   showValues?: boolean
+  valueTextClass?: string
+  labelTextClass?: string
+  labelBoxBorder?: string
+  lineDash?: string
+  dotStroke?: string
+  lineShadowY?: number
 }) {
   const H = height
-  const labelPad = labels ? 18 : 0
+  const labelPad = labels ? (labels.length > 8 ? 15 : 25) : 0
   const valuePad = showValues ? 16 : 0
-  const rawMin = Math.min(...values)
+  const topPad = 38
+  const leftPad = 26
+  const rightPad = 8
+  const plotW = W - leftPad - rightPad
+
   const rawMax = Math.max(...values)
-  const min = rawMin === rawMax ? rawMin - 1 : rawMin
-  const max = rawMax
-  const pts = toPoints(values, W, H, min, max)
-  const line = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  const axisMax = niceCeil(rawMax)
+  const span = values.length > 1 ? plotW / (values.length - 1) : 0
+  const xAt = (i: number) => leftPad + i * span
+  const yAt = (v: number) => H - (v / axisMax) * H
+  const pts = values.map((v, i) => [xAt(i), yAt(v)] as const)
+  const line = smoothLine(pts)
   const area =
-    `M${pts[0][1].toFixed(1)},${H} ` +
-    pts.map(([x, y]) => `L${x.toFixed(1)},${y.toFixed(1)}`).join(' ') +
-    ` L${pts[pts.length - 1][1].toFixed(1)},${H} Z`
+    `${line} L${pts[pts.length - 1][0].toFixed(1)},${H} L${pts[0][0].toFixed(1)},${H} Z`
   const gid = React.useId()
+  const peak = values.reduce((pi, v, i, a) => (v > a[pi] ? i : pi), 0)
+
+  const condensed = values.length > 8
+  const valueFont = condensed ? 8 : 10.5
+  const labelFont = labels ? (condensed ? 6.5 : 9) : 0
+  const ticks = [0, 0.25, 0.5, 0.75, 1]
+
   return (
     <svg
-      viewBox={`0 0 ${W} ${H + valuePad + labelPad}`}
+      viewBox={`0 0 ${W} ${topPad + H + valuePad + labelPad}`}
       role="img"
       aria-label="line chart"
       className="h-auto w-full"
     >
       <defs>
         <linearGradient id={`grad-${gid}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
           <stop offset="100%" stopColor={color} stopOpacity="0.02" />
         </linearGradient>
+        {lineShadowY ? (
+          <filter id={`shadow-${gid}`} x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2.5" />
+          </filter>
+        ) : null}
       </defs>
-      {[0.25, 0.5, 0.75].map((f) => (
-        <line
-          key={f}
-          x1={PAD_X}
-          x2={W - PAD_X}
-          y1={H * f}
-          y2={H * f}
-          stroke="#64748b"
-          strokeOpacity={0.22}
-          strokeDasharray="3 5"
+      <g transform={`translate(0 ${topPad})`}>
+        {ticks.map((f, i) => {
+          const ty = H - f * H
+          return (
+            <g key={i}>
+              <line x1={leftPad} x2={W - rightPad} y1={ty} y2={ty} stroke="#E5E7EB" strokeWidth={1} />
+              <text x={leftPad - 6} y={ty + 2.5} fontSize={7.5} textAnchor="end" fill="#9CA3AF">
+                {fmt(axisMax * f)}
+              </text>
+            </g>
+          )
+        })}
+        <path d={area} fill={`url(#grad-${gid})`} />
+        {lineShadowY ? (
+          <path
+            d={line}
+            transform={`translate(0 ${lineShadowY})`}
+            fill="none"
+            stroke={color}
+            strokeWidth={4}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray={lineDash}
+            opacity={0.35}
+            filter={`url(#shadow-${gid})`}
+          />
+        ) : null}
+        <path
+          d={line}
+          fill="none"
+          stroke={color}
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray={lineDash}
         />
-      ))}
-      <path d={area} fill={`url(#grad-${gid})`} />
-      <path d={line} fill="none" stroke={color} strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" />
-      {showValues &&
-        pts.map(([x, y], i) => (
-          <text
-            key={i}
-            x={x}
-            y={y - 7}
-            fontSize={9}
-            fontWeight={700}
-            textAnchor="middle"
-            className="fill-gray-600 tabular"
-          >
-            {fmt(values[i])}
-          </text>
-        ))}
-      {showDots &&
-        pts.map(([x, y], i) => (
-          <circle key={i} cx={x} cy={y} r={2.8} fill="#fff" stroke={color} strokeWidth={2} />
-        ))}
-      {labels?.map((l, i) => (
-        <text
-          key={i}
-          x={pts[i][0]}
-          y={H + valuePad + 13}
-          fontSize={9}
-          textAnchor="middle"
-          className="fill-gray-500"
-        >
-          {l}
-        </text>
-      ))}
+        {showValues &&
+          values.map((v, i) =>
+            i === peak ? null : (
+              <text
+                key={i}
+                x={pts[i][0]}
+                y={pts[i][1] - 9}
+                fontSize={valueFont}
+                fontWeight={700}
+                textAnchor="middle"
+                className={valueTextClass}
+              >
+                {fmt(v)}
+              </text>
+            ),
+          )}
+        {showDots &&
+          pts.map(([px, py], i) => (
+            <circle key={i} cx={px} cy={py} r={3} fill="#fff" stroke={dotStroke ?? color} strokeWidth={2.2} />
+          ))}
+        {(() => {
+          const [px, py] = pts[peak]
+          const bw = 64
+          const bh = 24
+          const bx = Math.min(Math.max(px - bw / 2, leftPad), W - rightPad - bw)
+          const by = py - bh - 10
+          return (
+            <g key="peak">
+              <circle cx={px} cy={py} r={4.6} fill="#F97316" stroke="#fff" strokeWidth={1.6} />
+              <line x1={px} y1={by + bh} x2={px} y2={py - 4} stroke="#FDBA74" strokeWidth={1} />
+              <rect x={bx} y={by} width={bw} height={bh} rx={6} fill="#fff" stroke="#FED7AA" strokeWidth={1} />
+              <text x={bx + bw / 2} y={by + 9} fontSize={7} textAnchor="middle" fill="#6B7280">
+                Highest sales
+              </text>
+              <text x={bx + bw / 2} y={by + 18.5} fontSize={9.5} fontWeight={800} textAnchor="middle" fill="#111827">
+                {fmt(values[peak])}
+              </text>
+            </g>
+          )
+        })()}
+        {labels?.map((l, i) => {
+          const lx = pts[i][0]
+          const ly = H + valuePad + (condensed ? 8 : 15)
+          const last = i === labels.length - 1
+          const pw = Math.max(l.length * labelFont * 0.62 + (condensed ? 6 : 12), condensed ? 16 : 24)
+          const ph = condensed ? 11 : 15
+          return (
+            <g key={i}>
+              <rect
+                x={lx - pw / 2}
+                y={ly - (condensed ? 6 : 8)}
+                width={pw}
+                height={ph}
+                rx={condensed ? 6 : 8}
+                fill={last ? '#E2E8F0' : '#F3F4F6'}
+                stroke={labelBoxBorder ?? '#e5e7eb'}
+                strokeWidth={1}
+              />
+              <text
+                x={lx}
+                y={ly}
+                fontSize={labelFont}
+                fontWeight={last ? 700 : 500}
+                textAnchor="middle"
+                className={last ? 'fill-gray-900' : labelTextClass}
+              >
+                {l}
+              </text>
+            </g>
+          )
+        })}
+      </g>
     </svg>
   )
 }

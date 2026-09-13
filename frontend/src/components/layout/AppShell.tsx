@@ -65,8 +65,8 @@ function NavItem({
       className={({ isActive }) =>
         `group relative flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
           isActive
-            ? 'bg-white/[0.06] text-white'
-            : 'text-gray-400 hover:bg-white/[0.04] hover:text-gray-100'
+            ? 'bg-brand-50 text-black'
+            : 'text-gray-800 hover:bg-brand-50 hover:text-black'
         }`
       }
     >
@@ -74,21 +74,21 @@ function NavItem({
         <>
           {isActive && (
             <span
-              className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-gradient-to-b from-brand-400 to-cyan-400"
+              className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-gradient-to-b from-brand-600 to-cyan-500"
               aria-hidden="true"
             />
           )}
           <span className="ml-1 shrink-0">
             <Icon
               className={`h-[18px] w-[18px] transition-colors ${
-                isActive ? 'text-brand-300' : 'text-gray-500 group-hover:text-gray-200'
+                isActive ? 'text-brand-600' : 'text-gray-500 group-hover:text-brand-700'
               }`}
             />
           </span>
           <span className="flex-1">{item.label}</span>
           <IconChevronRight
             className={`h-3.5 w-3.5 transition-opacity ${
-              isActive ? 'text-brand-400/80 opacity-100' : 'opacity-0 group-hover:opacity-60'
+              isActive ? 'text-brand-600/80 opacity-100' : 'opacity-0 group-hover:opacity-60'
             }`}
           />
         </>
@@ -102,7 +102,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <div className="flex items-center gap-3 px-6 py-6">
-        <img src="/storeye-logo.svg" alt="Storeye" className="h-9 w-auto rounded-lg ring-1 ring-white/10" />
+        <img src="/storeye-logo.svg" alt="Storeye" className="h-9 w-auto rounded-lg ring-1 ring-brand-100" />
+        <span className="text-lg font-bold tracking-tight text-black">storeye</span>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 pb-4 scrollbar-thin">
@@ -125,19 +126,19 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </nav>
       </div>
 
-      <div className="border-t border-white/[0.06] p-4">
-        <div className="mb-3 rounded-lg bg-white/[0.04] px-3.5 py-2.5 ring-1 ring-inset ring-white/[0.07]">
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-brand-300">
+      <div className="border-t border-gray-200 p-4">
+        <div className="mb-3 rounded-lg bg-brand-50 px-3.5 py-2.5 ring-1 ring-inset ring-brand-100">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-900">
             <IconStore className="h-3.5 w-3.5" /> Storeye Mart
           </p>
-          <p className="mt-0.5 text-[10px] text-gray-500">Offline-first · local PostgreSQL</p>
+          <p className="mt-0.5 text-[10px] text-gray-600">Offline-first · local PostgreSQL</p>
         </div>
-        <div className="flex items-center justify-between text-[10px] text-gray-500">
+        <div className="flex items-center justify-between text-[10px] text-gray-600">
           <span>Local edge node · PostgreSQL · AI runtime</span>
           <span className="flex items-center gap-1.5">
             <span
               className={`h-1.5 w-1.5 rounded-full ${
-                status.edgeOnline ? 'bg-emerald-400 shadow-[0_0_6px_1px_rgb(52_211_153/0.5)]' : 'bg-amber-400'
+                status.edgeOnline ? 'bg-emerald-500 shadow-[0_0_6px_1px_rgb(16_185_129/0.5)]' : 'bg-amber-500'
               }`}
               aria-hidden="true"
             />
@@ -156,27 +157,27 @@ export function AppShell() {
 
   const initials = (session?.userName ?? 'Gu').split(' ').map((s) => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
 
-  const topbarBg = 'bg-[#0a0f1c]/85 backdrop-blur-glass'
-  const sidebarBg = 'bg-[#0c1424] text-white'
+  const topbarBg = 'bg-white/90 backdrop-blur-glass'
+  const sidebarBg = 'bg-white text-brand-900'
 
   const iconBtn =
-    'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/[0.05] hover:text-gray-100'
+    'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-brand-50 hover:text-black'
 
   return (
-    <div className="flex min-h-screen bg-surface-100">
+    <div className="relative flex min-h-screen bg-white">
       {/* Desktop sidebar (>=1024px) */}
-      <aside className={`sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-white/[0.06] shadow-2xl lg:flex ${sidebarBg}`}>
+      <aside className={`sticky top-0 z-10 hidden h-screen w-64 shrink-0 flex-col border-r border-gray-200 shadow-lg lg:flex ${sidebarBg}`}>
         <SidebarContent />
       </aside>
 
       {/* Mobile drawer (<1024px) */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
-          <aside className={`absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-white/[0.08] shadow-2xl ${sidebarBg}`}>
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+          <aside className={`absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-gray-200 shadow-xl ${sidebarBg}`}>
             <button
               onClick={() => setMobileOpen(false)}
-              className="absolute right-3 top-5 flex h-10 w-10 items-center justify-center rounded-lg text-gray-400 hover:bg-white/[0.06] hover:text-gray-100"
+              className="absolute right-3 top-5 flex h-10 w-10 items-center justify-center rounded-lg text-brand-500 hover:bg-brand-50 hover:text-brand-800"
               aria-label="Close menu"
             >
               <IconClose className="h-5 w-5" />
@@ -188,9 +189,9 @@ export function AppShell() {
         </div>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         {/* Top bar */}
-        <header className={`sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-white/[0.06] px-3 sm:px-5 ${topbarBg}`}>
+        <header className={`sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-gray-200 px-3 sm:px-5 ${topbarBg}`}>
           <button
             onClick={() => setMobileOpen(true)}
             className={iconBtn}
@@ -201,12 +202,12 @@ export function AppShell() {
 
           {/* Search: icon-only below 768px, full input above */}
           <div className="relative hidden max-w-md flex-1 md:block">
-            <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-400" />
             <input
               type="search"
               placeholder="Search products, alerts, bills…"
               aria-label="Search"
-              className="h-10 w-full rounded-lg border border-white/[0.08] bg-white/[0.04] py-2 pl-10 pr-4 text-sm text-gray-100 placeholder-gray-500 focus:border-brand-500/60 focus:bg-white/[0.06] focus:outline-none focus:ring-1 focus:ring-brand-500/30"
+              className="h-10 w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder-gray-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-200"
             />
           </div>
           <button
@@ -223,8 +224,8 @@ export function AppShell() {
             <span
               className={`hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium ring-1 ring-inset md:inline-flex ${
                 status.edgeOnline
-                  ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/25'
-                  : 'bg-amber-500/10 text-amber-300 ring-amber-500/25'
+                  ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                  : 'bg-amber-50 text-amber-700 ring-amber-200'
               }`}
             >
               {status.edgeOnline ? <IconWifi className="h-3.5 w-3.5" /> : <IconWifiOff className="h-3.5 w-3.5" />}
@@ -233,8 +234,8 @@ export function AppShell() {
             <span
               className={`inline-flex h-10 w-10 items-center justify-center rounded-lg ring-1 ring-inset md:hidden ${
                 status.edgeOnline
-                  ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/25'
-                  : 'bg-amber-500/10 text-amber-300 ring-amber-500/25'
+                  ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                  : 'bg-amber-50 text-amber-700 ring-amber-200'
               }`}
               aria-label={status.edgeOnline ? 'Edge connected' : 'Edge offline'}
             >
@@ -246,15 +247,15 @@ export function AppShell() {
               aria-label="Notifications"
             >
               <IconBell className="h-5 w-5" />
-              <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-brand-400 ring-2 ring-[#0a0f1c]" />
+              <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-white" />
             </button>
 
-            <div className="ml-1 flex items-center gap-2.5 border-l border-white/[0.07] pl-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-bold text-white ring-1 ring-inset ring-white/15 shadow-soft">
+            <div className="ml-1 flex items-center gap-2.5 border-l border-gray-200 pl-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-xs font-bold text-white ring-1 ring-inset ring-brand-200 shadow-sm">
                 {initials}
               </span>
               <div className="hidden leading-tight lg:block">
-                <p className="text-sm font-semibold text-gray-100">{session?.userName ?? 'Guest'}</p>
+                <p className="text-sm font-semibold text-gray-900">{session?.userName ?? 'Guest'}</p>
                 <p className="text-xs text-gray-500">{session?.role}</p>
               </div>
               <button
@@ -273,9 +274,9 @@ export function AppShell() {
           <Outlet />
         </main>
 
-        <footer className="flex items-center justify-between border-t border-white/[0.06] bg-[#0d1526] px-6 py-3 text-[11px] text-gray-500">
+        <footer className="flex items-center justify-between border-t border-gray-200 bg-white px-6 py-3 text-[11px] text-gray-600">
           <span>Storeye · Edge AI Retail Intelligence</span>
-          <Link to="/app/settings" className="text-gray-500 hover:text-brand-400">
+          <Link to="/app/settings" className="text-gray-600 hover:text-black">
             v0.1.0 · offline-first
           </Link>
         </footer>

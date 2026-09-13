@@ -21,11 +21,12 @@ function renderLanding() {
 }
 
 describe('LandingPage', () => {
-  it('renders the hero and public CTAs', () => {
+  it('renders the first-page image and core sections', () => {
     renderLanding()
-    expect(screen.getByRole('heading', { name: /run your store/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /sign in to storeye/i })).toBeInTheDocument()
-    expect(screen.getByText(/edge-first · offline-first · private by design/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: /storeye running on a laptop and smartphone/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /one dashboard for everything your store does/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /see it for yourself/i })).toHaveAttribute('href', '/login')
   })
 
@@ -34,13 +35,13 @@ describe('LandingPage', () => {
     expect(screen.queryByText(/demo/i)).not.toBeInTheDocument()
   })
 
-  it('shows the dashboard CTA when a session exists', () => {
+  it('shows the dashboard links when a session exists', () => {
     window.localStorage.setItem(
       'storeye.auth.session',
       JSON.stringify({ userName: 'Ravi', role: 'ASSOCIATE', loginAt: new Date().toISOString() }),
     )
     renderLanding()
     expect(screen.getByRole('link', { name: /open dashboard/i })).toHaveAttribute('href', '/app')
-    expect(screen.queryByRole('link', { name: /sign in to storeye/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /start exploring/i })).toHaveAttribute('href', '/app')
   })
 })

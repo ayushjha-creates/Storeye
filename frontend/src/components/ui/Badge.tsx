@@ -12,12 +12,12 @@ const dots: Record<BadgeTone, string> = {
 }
 
 const tones: Record<BadgeTone, string> = {
-  gray: 'bg-white/[0.05] text-gray-500 ring-white/10',
-  green: 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/25',
-  amber: 'bg-amber-500/10 text-amber-300 ring-amber-500/25',
-  red: 'bg-red-500/10 text-red-300 ring-red-500/25',
-  blue: 'bg-sky-500/10 text-sky-300 ring-sky-500/25',
-  purple: 'bg-violet-500/10 text-violet-300 ring-violet-500/25',
+  gray: 'bg-gray-100 text-gray-700 ring-gray-200',
+  green: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  amber: 'bg-amber-50 text-amber-700 ring-amber-200',
+  red: 'bg-red-50 text-red-700 ring-red-200',
+  blue: 'bg-sky-50 text-sky-700 ring-sky-200',
+  purple: 'bg-violet-50 text-violet-700 ring-violet-200',
 }
 
 export function Badge({

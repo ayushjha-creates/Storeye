@@ -109,7 +109,7 @@ export function ReportsPage() {
           <div className="flex items-center gap-2.5">
             <h1 className="font-bold">Reports &amp; Analytics</h1>
           </div>
-          <p className="mt-0.5 text-sm text-gray-500">
+          <p className="mt-0.5 text-sm text-black">
             {storeName || 'Store'} · real billing &amp; sales records · {edgeOnline ? 'live' : 'last known good'}
           </p>
         </div>
@@ -168,7 +168,16 @@ export function ReportsPage() {
                 <EmptyState title="No sales records yet" hint="Create a bill from the Billing page to populate reports." />
               ) : (
                 <>
-                  <LineChart values={revenue14} labels={dayLabels(14)} color="#3b82f6" height={160} />
+<div className="overflow-hidden rounded-xl border border-gray-200 bg-white px-3 py-4">
+                    <LineChart
+                      values={revenue14}
+                      labels={dayLabels(14)}
+                      color="#3b82f6"
+                      dotStroke="#3b82f6"
+                      lineShadowY={3}
+                      height={150}
+                    />
+                  </div>
                   <p className="mt-2 text-xs text-gray-400">
                     {sales.length} sale record(s) on file.
                   </p>

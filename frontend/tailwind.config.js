@@ -31,25 +31,25 @@ export default {
           800: '#6b4a0d',
           900: '#52370c',
         },
-        // Surface scales are dark UI surfaces (page / card / alt panel).
+        // Surface scales are the page/card/alt panel backgrounds.
         surface: {
           100: '#0a0f1c',
-          200: '#101827',
-          300: '#16213a',
+          200: '#ffffff',
+          300: '#eef1f7',
         },
-        // Neutral text/border ramp remapped for dark mode so existing
-        // gray-* utilities render correctly on the dark surfaces.
+        // Neutral text/border ramp (standard light Tailwind slate ramp) so
+        // the white UI surfaces render with dark, readable text.
         gray: {
-          50: '#0e1728',
-          100: '#101a2e',
-          200: '#182338',
-          300: '#3b4a68',
-          400: '#7d8fb0',
-          500: '#93a5c4',
-          600: '#b6c2d8',
-          700: '#cdd8ea',
-          800: '#e6edf7',
-          900: '#f4f7fd',
+          50: '#f9fafb',
+          100: '#f3f4f6',
+          200: '#e5e7eb',
+          300: '#d1d5db',
+          400: '#9ca3af',
+          500: '#6b7280',
+          600: '#4b5563',
+          700: '#374151',
+          800: '#1f2937',
+          900: '#111827',
         },
       },
       fontFamily: {

@@ -32,14 +32,14 @@ export function Modal({
       aria-label={title}
     >
       <div
-        className={`card w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} p-5 shadow-lift`}
+        className={`card w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} p-5 shadow-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-100">{title}</h2>
+          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
           <button
             onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-white/[0.06] hover:text-gray-200"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
             aria-label="Close"
           >
             ✕
@@ -71,9 +71,9 @@ export function Button({
   const kinds = {
     primary: 'bg-brand-600 text-white hover:bg-brand-500 disabled:bg-gray-300 disabled:text-gray-500',
     secondary:
-      'bg-white/[0.04] text-gray-200 border border-white/10 hover:bg-white/[0.08] hover:text-white disabled:text-gray-500',
+      'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 hover:text-gray-900 disabled:text-gray-400',
     danger: 'bg-red-600 text-white hover:bg-red-500 disabled:bg-gray-300 disabled:text-gray-500',
-    ghost: 'text-brand-400 hover:bg-brand-500/10 hover:text-brand-300 disabled:text-gray-500',
+    ghost: 'text-brand-600 hover:bg-brand-50 hover:text-brand-800 disabled:text-gray-400',
   }
   return (
     <button

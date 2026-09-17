@@ -1,24 +1,73 @@
 # Status Summary
 
 ## Objective
-- Build the **new `storeye-frontend/`** app per the user's pasted design spec and finish it. ✅ ALL DONE.
-- (Earlier, shipped) main `frontend/` dark premium redesign + PPT Proposed Solution section.
+- **M23 — Storeye Deployment Packaging & One-Click Edge Setup** (IN PROGRESS).
+  Not a feature milestone: one-click provisioning (setup/migrate/seed/
+  demo-reset/doctor/start/stop/status/backup/restore), model validator +
+  doctor, offline-first docs (STATE A/B/C), clean-deployment verification, and
+  the §36 milestone report. Must preserve every M0–M22 feature/contract.
 
 ## Current State
-**storeye-frontend fully built and verified:**
-- Stack: React 18 + Vite 6 + plain JS/JSX, Tailwind 3.4.17, lucide-react ^0.462, recharts ^2.15, no router (state-based), no TS.
-- Files: `vite.config.js` (function manualChunks → react-vendor/charts/icons), `postcss.config.js`, `tailwind.config.js` (ink/brand/mist palette, Inter+Sora, shadows card/cardHover/glow/inner, radii xl2/xl3, bg-app-glow + grid-bg), `index.html` (Google Fonts), `src/index.css` (`.glass`, `.grid-bg`, `.bg-app-glow`, fadeUp, `.live-dot` pulse, `.input`, `.table-base`, `.empty-dash`, scrollbar). `src/data/seed.js` (NAV + all demo data), `src/hooks/useSocket.js` (stub, never connects), `src/lib/inventory.js` (reorderStatus/statusMeta/whatsappLink).
-- UI components: Badge, Button, Card, StatCard (tone icon tiles + trend arrow + hover radial glow), SectionTitle, AlertIcon, ImportDropzone (drag-over scale + keyboard), index.js.
-- Layout: NavIcon (lucide mapper incl. Milk/Cookie/CupSoda/History/etc), Sidebar (260px↔82px collapse, hidden <lg, logo, live-dot footer), Header (h-16 blur topbar, search md+, offline/connected toggle, role pill, avatar), Login (mock auth, prefilled email/password, emerald privacy footnote), AppLayout (mobile drawer + lg padding offset), index.js.
-- Pages (all `animate-fade-up`, SectionTitle → KPI grid → asymmetric content grid): Overview (greeting, 4 KPIs, 4-step pipeline strip, footfall AreaChart w/ gradient, edge status card w/ privacy callout, dismissible decision queue, reconciliation table w/ "local SQLite" caption), Inventory (ImportDropzone + toast, search, verification table w/ confidence bars + amber discrepancy rows + Reorder-via-WhatsApp deep link + inline Resolve), Queue (lane cards w/ traffic light status + animated load bars, wait BarChart + amber SLA ReferenceLine), Shopper (zone donut + legend, privacy checklist), Billing (cart ROI tray w/ staggered fade-up, itemized bill + 5% GST, UPI QR + WhatsApp receipt buttons), Tasks (priority bars + OPEN/DONE toggle + empty/done states), Cameras (health cards w/ live pulse, add-camera dash button→staged card, capture rules, privacy pledge).
-- `src/main.jsx`: login gate (Login → dashboard), state-based page switch, AppLayout wrapper.
-- **Verified:** `npm run build` clean — index 47KB / react-vendor 195KB / charts 392KB / icons 29KB, no empty chunks. Fixed `Basket`→`ShoppingBasket` (not exported by lucide-react). Dev server running on **http://localhost:5174** (5173 occupied by main frontend dev server, Vite auto-shifted). Browser opened. curl 200 OK.
+**M23 core DONE — backend 378 passed / frontend 119 passed, tooling live-tested:**
+- `backend/app/deployment/`: `report.py` (Check/CheckReport; PASS/WARN/ERROR/SKIP;
+  overall READY/DEGRADED/NOT READY; exit 0 = no ERROR), `model_check.py`
+  (`python -m app.deployment.model_check [--json] [--deep]` from `backend/`),
+  `doctor.py` (`python -m app.deployment.doctor [--json] [--no-db] [--fast]
+  [--api-url] [--frontend-url]`). Verified: model_check --deep → READY 5 ok;
+  doctor full deep → READY 12 ok.
+- `scripts/` one-click suite (all `bash -n` clean + live-tested end-to-end
+  incl. starting/stopping the project PostgreSQL cluster): `lib/common.sh`,
+  `setup.sh`, `migrate.sh`, `seed.sh`, `demo-reset.sh` (`--verify`),
+  `start.sh`, `stop.sh` (`--clean-orphans`, `--keep-db`), `status.sh`,
+  `doctor.sh`, `backup.sh` (pg_dump custom → `backups/`), `restore.sh`
+  (destructive; `--yes` required), `start-backend.sh`, `start-frontend.sh`,
+  `storeye` dispatcher (setup/migrate/seed/demo-reset/doctor/models/start/stop/
+  restart/status/backup/restore/logs/test/help). Fixed historical
+  `cd scripts/backend` path bug in start-backend/start-frontend.
+- `backend/scripts/demo_verify.py`: deterministic-reset proof (two reset+seed
+  cycles → identical counts; non-demo store preserved).
+- Env templates: root `.env.example` (grouped + labeled) and `frontend/.env.example`.
+- New tests: `test_deployment_utils.py` (19, `no_db`); added
+  `test_demo_reset_is_deterministic_and_isolated` to `test_demo_api.py` (11 pg).
+  Full suite **378 passed** (was 358). Frontend unchanged gates: `npx tsc -b`
+  clean, **119 vitest passed**, `npm run build` green (107.32 kB gzip JS).
+  `alembic check` clean at head `19c835a1a344`.
+- Live runs: `storeye start` → backend pid + frontend pid healthy; `--clean-orphans`
+  removed a stray uvicorn (80027) + vite (18801); `demo-reset --verify` →
+  deterministic True; `backup --all` → backups/storeye-20260917-085140.dump;
+  integrity_check on dev DB → OK, 0 errors/warnings.
+- Docs: new `docs/model_assets.md`, `camera_setup.md`, `quickstart_demo.md`,
+  `quickstart_edge.md`, `backup_restore.md`, `update_rollback.md`,
+  `docs/milestone_23_deployment_packaging.md` (§36 report: summary, architecture,
+  provisioning, network topology, install, configuration, verification logs,
+  logs, troubleshooting, rollback, outputs, test matrix, NOT VERIFIED);
+  `docs/deployment.md` + README reworked (one-click quickstart, scripts table,
+  process/log/backups layout). `.gitignore` now covers `/logs/` and `/backups/`.
+- Fixes made this session: `load_env` in `scripts/lib/common.sh` now parses
+  dotenv lines instead of `source` (values containing parens like
+  `LOG_FORMAT=%(levelname)-8s …` crashed bash); `stop.sh` now tries tracked
+  pid-files BEFORE `--clean-orphans` port sweeps (previously the running
+  services were labelled "orphans"). `backend/.env` was created from the
+  example (git-ignored).
 
 ## Important Notes
-- Port 5174 in use by storeye-frontend dev (keep running); main frontend holds 5173.
-- `whatsappLink` uses placeholder number 919000000000.
-- Main frontend: React 18.3 + Vite 5 + TS strict + Vitest 78 tests; gates `cd frontend && npx tsc -b && npx vitest run && npm run build`.
-- PPT accuracy facts (verified in code): YOLO11n + ByteTrack for people, fine-tuned YOLO checkpoint for shelves, **no YOLOv8n**.
+- **DB URLs**: always `DATABASE_URL="postgresql+psycopg2://storeye@localhost:5433/storeye"` for alembic/seed/integrity CLI; tests use `TEST_DATABASE_URL` → `storeye_test`.
+- **Startup probes under pytest**: `assess_runtime()`/`run_startup_checks()` skip the PostgreSQL probe when `"pytest" in sys.modules` (or `probe_database=False`). `/api/system/status` calls `skip_in_tests=False` and does probe the configured `DATABASE_URL`.
+- **init_engine gotcha**: `app/db/session.py:43` is a once-guarded singleton — first caller in a pytest session wins. Edge tests must `dispose_engine()` + `init_engine(TEST_DB_URL)` in their `client` fixture or the worker writes to prod storeye (FK violations).
+- **Shelf clock gotcha**: M15 shelf intelligence bounds its observation window with wall-clock `datetime.now()` (not the passed `now`). Scenario/test clocks must be near the wall clock (`NOW = datetime.now(timezone.utc) - timedelta(minutes=1)`) or shelf-derived insights won't appear.
+- **M23 gotchas**: doctor must use `session.execute(select(Camera)).scalars().all()` (not Session.exec); demo cameras have semantic `config.kind` and no source path → exempt from doctor's source-path warning; model validator min file size 64 KiB (Git-LFS stub guard) and must NEVER auto-download (STATE A/B/C boundary); `scripts` run under `set -euo pipefail` → `port_pid ... || true`; naive `pyzbar` import fails on macOS though `barcode_decoder.py` bootstraps `find_library` fine; `openvino` is optional (not installed); seed without `--reset` can transiently error on an already-seeded dev DB (re-run is fine, `--reset` path is robust); `pytest.ini` marker line has a cosmetic `opt-in)filterwarnings =` run-on (harmless).
+- **Frontend gotchas**: `Stat` counts up numeric values via rAF (never advances in jsdom) → assert labels/hints/string durations only; `stubFetchRoutes` matches URL substrings (list specific routes like `/activate` first); `getByText` is exact full-text match (use regex); use `getAllByText` for repeated labels. `Button` forwards `aria-label` (M21); it does NOT forward arbitrary props. `ErrorBoundary` swallows child render errors — restore `console.error` spy in tests.
+- `frontend/src/config/demo.ts` `resetKey` defaults to `storeye-demo-reset` (matches backend `Settings.DEMO_RESET_KEY` default); override via `VITE_DEMO_RESET_KEY`.
+- No auth system exists; demo mutating endpoints rely on the reset key + service-layer `is_demo` guard (documented limitation in `docs/privacy_architecture.md`).
+- Test markers: `pg`, `no_db`, `real_ai`. Camera `config.kind` must be `usb`/`file`/`rtsp`. EdgeRuntime `reid_enabled=None` override (edge tests use `reid_enabled=False`).
+- Legacy SQLite stack (`app/core/database.py`) is diagnostics-only (health/ready/metrics); never a business fallback. `DATABASE_URL` validation rejects `sqlite://`.
+- Main `frontend/` gates: `npx tsc -b && npx vitest run && npm run build`. `storeye-frontend/` is separate, NOT in git — don't restore.
+- Git: origin `https://github.com/ayushjha-creates/Storeye.git`, branch `main`. NOTE: currently `git` fails with `.git/index: unable to map index file: Operation timed out` (iCloud Drive filesystem) — plan for commits accordingly; no M23 commit has been made yet.
 
 ## Next Move
-- None pending. Await user feedback on storeye-frontend appearance/behavior; adjust as asked.
+- M23 is functionally complete: §36 report written, full regression re-run
+  today (378/378 backend, 119/119 frontend), live clean-deployment battery
+  executed (start→status→system/status→model_check→doctor→migrate→
+  demo-reset --verify→backup→restore-to-scratch+integrity→restart→stop).
+  Deliver the §37 final response. Optionally retry `git add/commit` once the
+  `.git/index` iCloud timeout clears (no M23 commit exists yet).

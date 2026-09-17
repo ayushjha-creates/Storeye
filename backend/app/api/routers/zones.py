@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..deps import get_db
 from ...models import Store, Zone
-from ...schemas import ZoneCreate, ZoneList, ZoneRead, ZoneUpdate
+from ...schemas import ZoneAnalyticsRead, ZoneCreate, ZoneList, ZoneRead, ZoneUpdate
+from ...services.journeys import JourneyService
 
 router = APIRouter(prefix="/zones", tags=["zones"])
 
@@ -66,3 +68,20 @@ def delete_zone(zone_id: UUID, db: Session = Depends(get_db)):
     zone = _get_zone_or_404(db, zone_id)
     db.delete(zone)
     db.commit()
+
+
+@router.get("/{zone_id}/analytics", response_model=ZoneAnalyticsRead)
+def zone_analytics(
+    zone_id: UUID,
+    store_id: Optional[UUID] = None,
+    start: Optional[datetime] = Query(default=None),
+    end: Optional[datetime] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Anonymous zone analytics (visits, dwell, currently inside)."""
+    analytics = JourneyService(db).zone_analytics(
+        zone_id=zone_id, store_id=store_id, start=start, end=end
+    )
+    if analytics is None:
+        raise HTTPException(status_code=404, detail="Zone not found")
+    return ZoneAnalyticsRead(**analytics)

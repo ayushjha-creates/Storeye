@@ -2,6 +2,9 @@ import React, { useState } from 'react'
 import { NavLink, Outlet, Link } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { useEdge } from '../../edge/EdgeContext'
+import { DemoBanner } from '../demo/DemoBanner'
+import { DemoBadge } from '../demo/DemoBadge'
+import { ErrorBoundary } from '../ErrorBoundary'
 import {
   IconActivity,
   IconAlert,
@@ -16,6 +19,7 @@ import {
   IconMenu,
   IconReceipt,
   IconRefresh,
+  IconRoute,
   IconScan,
   IconSearch,
   IconShelf,
@@ -26,6 +30,7 @@ import {
   IconWifi,
   IconWifiOff,
   IconClose,
+  IconLightbulb,
 } from '../ui/icons'
 
 const PRIMARY_NAV: { to: string; label: string; icon: (p: React.SVGProps<SVGSVGElement>) => React.ReactNode; end?: boolean }[] = [
@@ -33,6 +38,9 @@ const PRIMARY_NAV: { to: string; label: string; icon: (p: React.SVGProps<SVGSVGE
   { to: '/app/live-store', label: 'Live Store', icon: IconStore },
   { to: '/app/product-intelligence', label: 'Product Intelligence', icon: IconSparkle },
   { to: '/app/shelf-intelligence', label: 'Shelf Intelligence', icon: IconShelf },
+  { to: '/app/journeys', label: 'Journeys', icon: IconRoute },
+  { to: '/app/insights', label: 'Insights', icon: IconLightbulb },
+  { to: '/app/demo', label: 'Demo Control', icon: IconSparkle },
   { to: '/app/alerts', label: 'Alerts', icon: IconAlert },
   { to: '/app/inventory', label: 'Inventory', icon: IconBox, end: true },
   { to: '/app/inventory/receive', label: 'Smart Receiving', icon: IconScan },
@@ -220,6 +228,9 @@ export function AppShell() {
           <div className="flex-1 md:hidden" />
 
           <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+            <span className="hidden sm:block">
+              <DemoBadge />
+            </span>
             {/* Edge pill → icon-only below md */}
             <span
               className={`hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium ring-1 ring-inset md:inline-flex ${
@@ -271,7 +282,10 @@ export function AppShell() {
         </header>
 
         <main className="flex-1">
-          <Outlet />
+          <DemoBanner />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
 
         <footer className="flex items-center justify-between border-t border-gray-200 bg-white px-6 py-3 text-[11px] text-gray-600">

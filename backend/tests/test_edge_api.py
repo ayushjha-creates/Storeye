@@ -85,16 +85,22 @@ def client(db, tmp_path, monkeypatch):
 
     # Route the GLOBAL DB engine (used by the edge worker's background writer)
     # to the isolated test database so AI observations never touch production.
+    # `init_engine` is once-guarded process-wide, so force it to re-bind here —
+    # otherwise an earlier module's lazy init could leave the worker writing to
+    # production storeye (where the test camera row does not exist).
     monkeypatch.setenv("DATABASE_URL", TEST_DB_URL)
-    from app.db.session import init_engine
+    from app.db.session import dispose_engine, init_engine
+    dispose_engine()
     init_engine(TEST_DB_URL)
 
     def override_get_db():
         yield db
 
     app.dependency_overrides[get_db] = override_get_db
-    # Inject a fake-model runtime for deterministic edge runs.
-    fake_rt = EdgeRuntime(registry=_FakeRegistry())
+    # Inject a fake-model runtime for deterministic edge runs. Re-ID is kept
+    # OFF here so the embedding provider (which would lazily import torch on
+    # the first person frame) never slows the 0.5s frame cadence.
+    fake_rt = EdgeRuntime(registry=_FakeRegistry(), reid_enabled=False)
     set_runtime(fake_rt)
 
     from fastapi.testclient import TestClient
@@ -222,10 +228,17 @@ def test_edge_observations_persist_without_touching_inventory(client, db, store,
         },
     })
     client.post(f"/api/edge/cameras/{str(cam.id)}/start")
-    time.sleep(1.2)
+
+    obs_count = 0
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        obs_count = db.query(Observation).count()
+        if obs_count > 0:
+            break
+        time.sleep(0.1)
+
     client.post(f"/api/edge/cameras/{str(cam.id)}/stop")
 
-    obs_count = db.query(Observation).count()
     inv_count = db.query(Inventory).count()
     assert obs_count > 0  # AI observations were persisted
     assert inv_count == 0  # and NOTHING touched inventory

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import List, Optional
 
 
 class CameraKind(str, Enum):
@@ -72,6 +73,24 @@ class CameraConfig:
     source: str = "0"
     name: str = "Camera"
     pipelines: PipelineConfig = field(default_factory=PipelineConfig)
+
+    # ------------------------------------------------------------------
+    # M19 journey additions (all optional for full backward compatibility).
+    # ------------------------------------------------------------------
+    # The physical zone this camera primarily observes. Zone mapping regions
+    # for frame-level zone detection (z-pattern) live in `camera_zones`.
+    zone_id: Optional[str] = None
+
+    # Normalized (0..1) bounding boxes per zone id.  The foot-point (bottom-
+    # center) of a person bbox is compared against these regions to detect
+    # zone-enter / zone-exit transitions.  Format:
+    # [{"zone_id": str, "bbox": [x1, y1, x2, y2]}]
+    camera_zones: List[dict] = field(default_factory=list)
+
+    # Explicit list of camera_ids this camera can legally transition TO.
+    # Empty list = default-open (any destination allowed).  Empty dict (not
+    # provided) also = default-open.
+    next_cameras: List[str] = field(default_factory=list)
 
     @property
     def device_index(self) -> int | None:

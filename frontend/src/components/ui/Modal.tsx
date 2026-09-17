@@ -59,6 +59,7 @@ export function Button({
   disabled,
   className = '',
   title,
+  'aria-label': ariaLabel,
 }: {
   children: React.ReactNode
   onClick?: () => void
@@ -67,6 +68,7 @@ export function Button({
   disabled?: boolean
   className?: string
   title?: string
+  'aria-label'?: string
 }) {
   const kinds = {
     primary: 'bg-brand-600 text-white hover:bg-brand-500 disabled:bg-gray-300 disabled:text-gray-500',
@@ -81,6 +83,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={ariaLabel}
       className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed ${kinds[kind]} ${className}`}
     >
       {children}

@@ -23,6 +23,10 @@ class EventKind(str, Enum):
     PRODUCT = "PRODUCT"
     TEXT = "TEXT"
     EXPIRY_METADATA = "EXPIRY_METADATA"
+    # M19 journey events (written to the journeys tables, not observations).
+    TRACK_ASSOC = "TRACK_ASSOC"
+    ZONE_ENTER = "ZONE_ENTER"
+    ZONE_EXIT = "ZONE_EXIT"
 
 
 @dataclass
@@ -40,12 +44,39 @@ class Detection:
 @dataclass
 class PersonDetection(Detection):
     track_id: Optional[int] = None
+    # M19: anonymous global person id assigned by the Re-ID layer (optional).
+    global_person_id: Optional[str] = None
+    reid_confidence: Optional[str] = None
+    zone_id: Optional[str] = None
 
 
 @dataclass
 class ProductDetection(Detection):
     # product class/name as detected by the shelf detector (e.g. "Complan").
     pass
+
+
+@dataclass
+class TrackAssocDetection(Detection):
+    """A local (camera, track) got assigned an anonymous global person id."""
+
+    track_id: Optional[int] = None
+    global_person_id: Optional[str] = None
+    association_confidence: Optional[str] = None
+
+
+@dataclass
+class ZoneDetection(Detection):
+    """Zone enter/exit for an anonymous tracked person.
+
+    Carries only the opaque global person id (optional) + the physical zone id
+    + frame meta. Never identity.
+    """
+
+    track_id: Optional[int] = None
+    global_person_id: Optional[str] = None
+    zone_id: Optional[str] = None
+    association_confidence: Optional[str] = None
 
 
 @dataclass
@@ -101,6 +132,9 @@ def person_event(
     bbox_xyxy: list,
     class_name: str = "person",
     source: Optional[str] = None,
+    global_person_id: Optional[str] = None,
+    reid_confidence: Optional[str] = None,
+    zone_id: Optional[str] = None,
 ) -> EdgeEvent:
     person = PersonDetection(
         class_id=0,
@@ -108,6 +142,9 @@ def person_event(
         confidence=confidence,
         bbox_xyxy=bbox_xyxy,
         track_id=track_id,
+        global_person_id=global_person_id,
+        reid_confidence=reid_confidence,
+        zone_id=zone_id,
     )
     return EdgeEvent(
         kind=EventKind.PERSON,
@@ -116,6 +153,91 @@ def person_event(
         frame_number=frame_number,
         confidence=confidence,
         payload=person,
+        source=source,
+    )
+
+
+def track_assoc_event(
+    *,
+    camera_id: str,
+    frame_number: int,
+    timestamp: datetime,
+    track_id: int,
+    global_person_id: str,
+    confidence: str,
+    source: Optional[str] = None,
+) -> EdgeEvent:
+    return EdgeEvent(
+        kind=EventKind.TRACK_ASSOC,
+        camera_id=camera_id,
+        timestamp=timestamp,
+        frame_number=frame_number,
+        confidence=None,
+        payload=TrackAssocDetection(
+            class_id=0,
+            class_name="person",
+            confidence=1.0,
+            bbox_xyxy=[0.0, 0.0, 0.0, 0.0],
+            track_id=track_id,
+            global_person_id=global_person_id,
+            association_confidence=confidence,
+        ),
+        source=source,
+    )
+
+
+def zone_enter_event(
+    *,
+    camera_id: str,
+    frame_number: int,
+    timestamp: datetime,
+    track_id: int,
+    global_person_id: str,
+    zone_id: str,
+    confidence: str,
+    bbox_xyxy: list,
+    source: Optional[str] = None,
+) -> EdgeEvent:
+    return EdgeEvent(
+        kind=EventKind.ZONE_ENTER,
+        camera_id=camera_id,
+        timestamp=timestamp,
+        frame_number=frame_number,
+        confidence=None,
+        payload=ZoneDetection(
+            class_id=0, class_name="person", confidence=1.0,
+            bbox_xyxy=bbox_xyxy,
+            track_id=track_id, global_person_id=global_person_id, zone_id=zone_id,
+            association_confidence=confidence,
+        ),
+        source=source,
+    )
+
+
+def zone_exit_event(
+    *,
+    camera_id: str,
+    frame_number: int,
+    timestamp: datetime,
+    track_id: int,
+    global_person_id: str,
+    zone_id: str,
+    confidence: str,
+    bbox_xyxy: list,
+    source: Optional[str] = None,
+) -> EdgeEvent:
+    return EdgeEvent(
+        kind=EventKind.ZONE_EXIT,
+        camera_id=camera_id,
+        timestamp=timestamp,
+        frame_number=frame_number,
+        confidence=None,
+        payload=ZoneDetection(
+            class_id=0, class_name="person", confidence=1.0,
+            bbox_xyxy=bbox_xyxy,
+            track_id=track_id, global_person_id=global_person_id, zone_id=zone_id,
+            association_confidence=confidence,
+        ),
         source=source,
     )
 

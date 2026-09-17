@@ -14,6 +14,7 @@ env/
 node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/tsconfig.tsbuildinfo
 
 # Data
 data/
@@ -45,6 +46,10 @@ Thumbs.db
 
 # Docker
 docker/*.log
+
+# M23 runtime logs, pid files and backups (created by scripts/; never committed)
+/logs/
+/backups/
 
 # Logs
 *.log

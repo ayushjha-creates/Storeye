@@ -17,17 +17,22 @@ import { reconciliationApi } from '../lib/api/reconciliation'
 import { inventoryApi } from '../lib/api/inventory'
 import { intelligenceApi } from '../lib/api/intelligence'
 import { alertApi } from '../lib/api/alerts'
+import { insightApi } from '../lib/api/insights'
+import { demoApi } from '../lib/api/demo'
 import type {
   AISummary,
   Alert,
   Batch,
   Camera,
+  DemoScenarioStatus,
+  InsightSummary,
   Inventory,
   Observation,
   Product,
   ReconciliationResult,
   Sale,
   Store,
+  StoreHealthMetrics,
 } from '../lib/api/types'
 import { storeApi } from '../lib/api/zone'
 import {
@@ -86,6 +91,9 @@ export function DashboardPage() {
   const [sales, setSales] = useState<Sale[]>([])
   const [aiSummary, setAiSummary] = useState<AISummary | null>(null)
   const [listAlerts, setListAlerts] = useState<Alert[]>([])
+  const [insightSummary, setInsightSummary] = useState<InsightSummary | null>(null)
+  const [storeHealth, setStoreHealth] = useState<StoreHealthMetrics | null>(null)
+  const [demoStatus, setDemoStatus] = useState<DemoScenarioStatus | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [loading, setLoading] = useState(true)
 
@@ -131,6 +139,24 @@ export function DashboardPage() {
           setListAlerts(alertRes.items)
         } catch {
           setListAlerts([]) // alert centre optional on the dashboard
+        }
+
+        try {
+          const ins = await insightApi.summary(sid)
+          setInsightSummary(ins)
+        } catch {
+          setInsightSummary(null) // store intelligence optional on the dashboard
+        }
+        try {
+          const health = await insightApi.storeHealth(sid)
+          setStoreHealth(health)
+        } catch {
+          setStoreHealth(null)
+        }
+        try {
+          setDemoStatus(await demoApi.status())
+        } catch {
+          setDemoStatus(null) // showcase scenario optional on the dashboard
         }
       }
 
@@ -580,6 +606,114 @@ export function DashboardPage() {
                     Open camera dashboard →
                   </Link>
                 </div>
+              </Card>
+
+              <Card
+                title="Showcase Scenario"
+                subtitle="Deterministic demo state applied by the backend"
+                action={
+                  <Link to="/app/demo" className="text-xs font-medium text-brand-700 hover:underline">
+                    Control →
+                  </Link>
+                }
+              >
+                {demoStatus == null ? (
+                  <EmptyState
+                    title="Showcase unavailable"
+                    hint="Demo mode is disabled, or the demo store is not seeded."
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                      <span className="text-xs text-gray-500">Active scenario</span>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {demoStatus.scenario?.name ?? '—'}
+                      </span>
+                    </div>
+                    {demoStatus.scenario?.description ? (
+                      <p className="text-xs text-gray-500">{demoStatus.scenario.description}</p>
+                    ) : null}
+                    <Link
+                      to="/app/demo"
+                      className="inline-flex text-sm font-medium text-brand-700 hover:underline"
+                    >
+                      Switch scenario →
+                    </Link>
+                  </div>
+                )}
+              </Card>
+
+              <Card
+                title="Store Intelligence"
+                subtitle="Insights with evidence — no automated stock changes"
+                action={
+                  <Link to="/app/insights" className="text-xs font-medium text-brand-700 hover:underline">
+                    Insights →
+                  </Link>
+                }
+              >
+                {insightSummary == null ? (
+                  <EmptyState
+                    title="No insights yet"
+                    hint="Run “Evaluate now” from the Insights page."
+                  />
+                ) : (
+                  <>
+                    <div className="mb-3 grid grid-cols-2 gap-3">
+                      <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs text-gray-500">State</p>
+                        <p
+                          className={`text-2xl font-bold ${
+                            storeHealth?.state === 'CRITICAL'
+                              ? 'text-red-600'
+                              : storeHealth?.state === 'ATTENTION'
+                                ? 'text-amber-600'
+                                : storeHealth?.state === 'HEALTHY'
+                                  ? 'text-emerald-700'
+                                  : 'text-gray-900'
+                          }`}
+                        >
+                          {storeHealth?.state ?? '—'}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs text-gray-500">Open insights</p>
+                        <p className={`text-2xl font-bold ${insightSummary.open ? 'text-amber-600' : 'text-gray-900'}`}>
+                          {insightSummary.open}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {storeHealth && storeHealth.basis.slice(0, 2).map((line) => (
+                        <Badge key={line} tone="gray">
+                          {line}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="mb-2 space-y-1.5">
+                      {insightSummary.by_type &&
+                        Object.entries(insightSummary.by_type)
+                          .sort((a, b) => b[1] - a[1])
+                          .slice(0, 3)
+                          .map(([cat, count]) => (
+                            <div
+                              key={cat}
+                              className="flex items-center justify-between text-sm"
+                            >
+                              <span className="text-gray-600">{cat}</span>
+                              <span className="font-semibold text-gray-900 tabular">{count}</span>
+                            </div>
+                          ))}
+                    </div>
+                    {insightSummary.high_priority > 0 ? (
+                      <p className="text-xs font-medium text-red-600">
+                        {insightSummary.high_priority} high-priority open
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-500">No high-priority open insights.</p>
+                    )}
+                  </>
+                )}
               </Card>
 
               <Card

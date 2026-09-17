@@ -5,9 +5,15 @@ directly; the API layer maps to/from these schemas.
 """
 
 from .store import StoreCreate, StoreRead, StoreUpdate, StoreList
+from .demo import (
+    DemoActivationResult,
+    DemoScenarioList,
+    DemoScenarioRead,
+    DemoStatusRead,
+)
 from .user import UserCreate, UserRead, UserUpdate, UserList
 from .camera import CameraCreate, CameraRead, CameraUpdate, CameraList
-from .zone import ZoneCreate, ZoneRead, ZoneUpdate, ZoneList
+from .zone import ZoneAnalyticsRead, ZoneCreate, ZoneRead, ZoneUpdate, ZoneList
 from .shelf import ShelfCreate, ShelfRead, ShelfUpdate, ShelfList
 from .product import ProductCreate, ProductRead, ProductUpdate, ProductList
 from .batch import BatchCreate, BatchRead, BatchUpdate, BatchList
@@ -78,6 +84,29 @@ from .intelligence import (
     ShelfSummaryRead,
     ShelfVisibleProductRead,
 )
+from .journey import (
+    CameraVisitedRead,
+    JourneyDetailRead,
+    JourneyItemRead,
+    JourneyListRead,
+    JourneySummaryRead,
+    MostVisitedZoneRead,
+    TimelineEventRead,
+    TrackAssociationRead,
+    TransitionRead,
+    ZoneVisitedRead,
+    ZoneVisitRead,
+)
+from .insight import (
+    InsightEvaluateIn,
+    InsightEvaluateResult,
+    InsightFilterIn,
+    InsightList,
+    InsightRead,
+    InsightStatusIn,
+    InsightSummary,
+    StoreHealthMetrics,
+)
 
 __all__ = [
     "StoreCreate",
@@ -96,6 +125,7 @@ __all__ = [
     "ZoneRead",
     "ZoneUpdate",
     "ZoneList",
+    "ZoneAnalyticsRead",
     "ShelfCreate",
     "ShelfRead",
     "ShelfUpdate",
@@ -166,4 +196,27 @@ __all__ = [
     "ShelfIntelligenceRead",
     "ShelfSummaryRead",
     "ShelfVisibleProductRead",
+    "CameraVisitedRead",
+    "JourneyDetailRead",
+    "JourneyItemRead",
+    "JourneyListRead",
+    "JourneySummaryRead",
+    "MostVisitedZoneRead",
+    "TimelineEventRead",
+    "TrackAssociationRead",
+    "TransitionRead",
+    "ZoneVisitedRead",
+    "ZoneVisitRead",
+    "InsightEvaluateIn",
+    "InsightEvaluateResult",
+    "InsightFilterIn",
+    "InsightList",
+    "InsightRead",
+    "InsightStatusIn",
+    "InsightSummary",
+    "StoreHealthMetrics",
+    "DemoScenarioRead",
+    "DemoScenarioList",
+    "DemoStatusRead",
+    "DemoActivationResult",
 ]

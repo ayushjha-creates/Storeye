@@ -553,3 +553,291 @@ export interface AlertEvaluateResult {
   skipped: number // evaluated but below thresholds / insufficient evidence
   alerts: Alert[]
 }
+
+// ── M19: Anonymous Customer Journeys ─────────────────────────────────────
+
+export interface CameraVisited {
+  camera_id: string
+  name: string | null
+}
+
+export interface ZoneVisited {
+  zone_id: string
+  name: string | null
+  visits: number
+}
+
+export interface JourneyItem {
+  global_person_id: string
+  store_id: string
+  status: 'active' | 'expired'
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
+  first_seen_at: string
+  last_seen_at: string
+  duration_seconds: number
+  camera_count: number
+  cameras_visited: CameraVisited[]
+  zone_visits_total: number
+  zones_visited: ZoneVisited[]
+}
+
+export interface JourneyList {
+  items: JourneyItem[]
+  total: number
+}
+
+export interface TrackAssociation {
+  camera_id: string | null
+  camera_name: string | null
+  track_id: number
+  started_at: string
+  ended_at: string | null
+  last_seen_at: string
+  confidence: string
+}
+
+export interface ZoneVisit {
+  zone_id: string
+  zone_name: string | null
+  camera_id: string | null
+  camera_name: string | null
+  entered_at: string
+  exited_at: string | null
+  dwell_seconds: number | null
+  confidence: string
+}
+
+export interface Transition {
+  from_camera_id: string | null
+  from_camera_name: string | null
+  to_camera_id: string | null
+  to_camera_name: string | null
+  transitioned_at: string
+  time_gap_seconds: number | null
+  confidence: string
+}
+
+export interface TimelineEvent {
+  at: string
+  type: string
+  camera_id: string | null
+  camera_name: string | null
+  zone_id: string | null
+  zone_name: string | null
+  detail: string
+}
+
+export interface JourneyDetail extends JourneyItem {
+  track_associations: TrackAssociation[]
+  zone_visits: ZoneVisit[]
+  transitions: Transition[]
+  timeline: TimelineEvent[]
+}
+
+export interface MostVisitedZone {
+  zone_id: string
+  name: string | null
+  visits: number
+}
+
+export interface JourneySummary {
+  total_visitors: number
+  active_visitors: number
+  avg_visit_duration_seconds: number | null
+  avg_zone_dwell_seconds: number | null
+  total_zone_visits: number
+  most_visited_zone: MostVisitedZone | null
+}
+
+export interface ZoneAnalytics {
+  zone_id: string
+  zone_name: string
+  store_id: string
+  period_start: string | null
+  period_end: string | null
+  visits_total: number
+  visitors_unique: number
+  avg_dwell_seconds: number | null
+  max_dwell_seconds: number | null
+  p90_dwell_seconds: number | null
+  currently_inside: number
+  most_recent_visit_at: string | null
+}
+
+// ── M20: Store Intelligence Insights ─────────────────────────────────────
+// Mirrors backend/app/models/insight.py + schemas/insight.py exactly.
+
+export type InsightCategory =
+  | 'inventory'
+  | 'shelf'
+  | 'expiry'
+  | 'customer_flow'
+  | 'camera'
+  | 'store_health'
+
+export type InsightType =
+  | 'LOW_STOCK'
+  | 'OUT_OF_STOCK'
+  | 'LOW_STOCK_WITH_LOW_SHELF_AVAILABILITY'
+  | 'HIGH_SELLING_LOW_STOCK'
+  | 'EXPIRY_RISK'
+  | 'EXPIRED_BATCH'
+  | 'STOCK_ROTATION_RECOMMENDATION'
+  | 'LOW_SHELF_AVAILABILITY'
+  | 'MISPLACEMENT'
+  | 'HIGH_TRAFFIC_ZONE'
+  | 'HIGH_DWELL_ZONE'
+  | 'HIGH_TRAFFIC_LOW_SHELF_AVAILABILITY'
+  | 'CAMERA_HEALTH'
+  | 'INVENTORY_RISK'
+  | 'STORE_HEALTH'
+
+export type InsightStatus = 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'EXPIRED'
+export type InsightCertainty = 'HIGH' | 'MEDIUM' | 'LOW'
+
+export interface Insight {
+  id: string
+  store_id: string
+  category: InsightCategory
+  insight_type: InsightType
+  severity: AlertSeverity
+  status: InsightStatus
+  title: string
+  description: string | null
+  rule_id: string
+  source_modules: string[] | null
+  evidence: Record<string, unknown> | null
+  recommended_action: string | null
+  certainty: InsightCertainty
+  entity_type: string
+  entity_id: string
+  product_id: string | null
+  shelf_id: string | null
+  zone_id: string | null
+  camera_id: string | null
+  first_detected_at: string
+  last_detected_at: string
+  expires_at: string | null
+  acknowledged_at: string | null
+  resolved_at: string | null
+  expired_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface InsightSummary {
+  store_id: string
+  total: number
+  open: number
+  acknowledged: number
+  high_priority: number // active (open+acknowledged) HIGH/CRITICAL
+  inventory: number
+  shelf: number
+  expiry: number
+  customer_flow: number
+  camera: number
+  store_health: number
+  by_type: Record<string, number>
+  by_severity: Record<string, number>
+}
+
+export interface StoreHealthMetrics {
+  store_id: string
+  state: 'HEALTHY' | 'ATTENTION' | 'CRITICAL'
+  basis: string[] // human-readable reasons behind the state
+  cameras: Record<string, unknown>
+  inventory: Record<string, unknown>
+  shelf: Record<string, unknown>
+  alerts: Record<string, unknown>
+  expiry: Record<string, unknown>
+  customer_flow: Record<string, unknown>
+  edge: Record<string, unknown>
+  evaluated_at: string | null
+}
+
+export interface InsightEvaluateResult {
+  evaluated_at: string
+  store_id: string
+  candidates: number
+  created: number
+  refreshed: number
+  resolved: number
+  expired: number
+  alerts_created: number
+  alerts_updated: number
+  insights: Insight[]
+}
+
+// ── M21: Demo & Scenario Engine ──────────────────────────────────────────
+// Mirrors backend/app/schemas/demo.py. Scenarios live in the backend DB; the
+// UI only requests activation. Refresh keeps the active scenario.
+
+export type DemoScenarioKey =
+  | 'NORMAL_STORE'
+  | 'LOW_STOCK'
+  | 'OUT_OF_STOCK'
+  | 'EXPIRY_RISK'
+  | 'LOW_SHELF_BACKSTOCK'
+  | 'MISPLACEMENT'
+  | 'HIGH_TRAFFIC'
+  | 'HIGH_DWELL'
+  | 'MULTI_CAMERA_JOURNEY'
+  | 'CAMERA_OFFLINE'
+  | 'SMART_RECEIVING'
+  | 'COMBINED_CRISIS'
+
+export interface DemoScenario {
+  key: DemoScenarioKey
+  name: string
+  description: string
+  category: string
+  expected: string[]
+  focus_path: string
+  active: boolean
+}
+
+export interface DemoScenarioList {
+  demo_mode: boolean
+  demo_store: string
+  store_exists: boolean
+  store_is_demo: boolean
+  active_key: DemoScenarioKey | null
+  scenarios: DemoScenario[]
+}
+
+export interface DemoScenarioStatus {
+  demo_mode: boolean
+  demo_store: string
+  demo_store_id: string
+  store_exists: boolean
+  store_is_demo: boolean
+  active_key: DemoScenarioKey | null
+  scenario: {
+    key: DemoScenarioKey
+    name: string
+    description: string
+    category: string
+  } | null
+  last_reset_at: string | null
+  last_activated_at: string | null
+}
+
+export interface DemoEvaluationResult {
+  candidates: number
+  created: number
+  refreshed: number
+  resolved: number
+  expired: number
+  alerts_created: number
+  alerts_updated: number
+}
+
+export interface DemoActivationResult {
+  ok: boolean
+  active_key: DemoScenarioKey
+  scenario: DemoScenario
+  store: { id: string; name: string }
+  metrics: Record<string, unknown>
+  evaluation: DemoEvaluationResult
+  activated_at: string
+}

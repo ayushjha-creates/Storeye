@@ -161,12 +161,15 @@ class CameraWorker:
         # get_session() auto-initializes the DB engine if needed, so a background
         # worker thread never hits an un-initialized SessionLocal.
         from ..db.session import get_session
+        from ..services.journeys import JourneyService
+
         session = get_session()
         writer = ObservationWriter(
             session,
             store_id=self.store_id,
             camera_id=self.config.camera_id,
             min_gap_seconds=self.config.pipelines.min_observation_gap_seconds,
+            journey_service=JourneyService(session),
         )
         self._writer_owned = True
         return writer

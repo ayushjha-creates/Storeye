@@ -13,6 +13,8 @@ from . import (
     alerts,
     batch_intake,
     demo,
+    journeys,
+    insights,
 )
 
 __all__ = [
@@ -33,4 +35,6 @@ __all__ = [
     "alerts",
     "batch_intake",
     "demo",
+    "journeys",
+    "insights",
 ]

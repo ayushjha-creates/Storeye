@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Storeye — one-click dispatcher.
+#
+#   ./scripts/storeye setup        install everything + bootstrap the DB
+#   ./scripts/storeye start        start PostgreSQL + backend + frontend
+#   ./scripts/storeye stop         stop everything (graceful)
+#   ./scripts/storeye restart      stop then start
+#   ./scripts/storeye status       component + health status
+#   ./scripts/storeye doctor       environment readiness check (--no-db/--json)
+#   ./scripts/storeye models       validate AI model assets (no downloads)
+#   ./scripts/storeye migrate      alembic upgrade head + check
+#   ./scripts/storeye seed         seed demo store (idempotent)
+#   ./scripts/storeye demo-reset   deterministic demo reset [--verify]
+#   ./scripts/storeye backup       pg_dump to backups/  [--all]
+#   ./scripts/storeye restore F    restore backups/F --yes
+#   ./scripts/storeye logs         tail backend/frontend logs
+#   ./scripts/storeye test         run the full test suite
+# ============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$SCRIPT_DIR/lib/common.sh"
+
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+  setup)        bash "$SCRIPT_DIR/setup.sh" "$@" ;;
+  migrate)      bash "$SCRIPT_DIR/migrate.sh" "$@" ;;
+  seed|demo-seed) bash "$SCRIPT_DIR/seed.sh" "$@" ;;
+  demo-reset)   bash "$SCRIPT_DIR/demo-reset.sh" "$@" ;;
+  doctor)       bash "$SCRIPT_DIR/doctor.sh" "$@" ;;
+  models)
+    ensure_venv
+    load_env
+    echo "Storeye model-asset validation"
+    ( cd "$BACKEND_DIR" && "$(venv_python)" -m app.deployment.model_check --deep "$@" ) ;;
+  start)        bash "$SCRIPT_DIR/start.sh" "$@" ;;
+  stop)         bash "$SCRIPT_DIR/stop.sh" "$@" ;;
+  restart)      bash "$SCRIPT_DIR/stop.sh" "$@"
+                echo
+                bash "$SCRIPT_DIR/start.sh" "$@" ;;
+  status)       bash "$SCRIPT_DIR/status.sh" "$@" ;;
+  backup)       bash "$SCRIPT_DIR/backup.sh" "$@" ;;
+  restore)      bash "$SCRIPT_DIR/restore.sh" "$@" ;;
+  logs)
+    load_env; ensure_dirs
+    local_file() { ls -t "$1" 2>/dev/null | head -1; }
+    BLOG="$(local_file "${LOGS_BACKEND}"/*.log)"
+    FLOG="$(local_file "${LOGS_FRONTEND}"/*.log)"
+    if [ $# -gt 0 ]; then
+      case "$1" in
+        backend)  [ -n "$BLOG" ] && tail -f "$BLOG" || die "no backend log yet" ;;
+        frontend) [ -n "$FLOG" ] && tail -f "$FLOG" || die "no frontend log yet" ;;
+        pg|postgres) tail -f "$LOGS_BACKEND/postgres.log" ;;
+        *) die "logs: unknown target '$1' (backend|frontend|postgres)" ;;
+      esac
+    else
+      echo "Backend logs:   $LOGS_BACKEND/"
+      echo "Frontend logs:  $LOGS_FRONTEND/"
+      echo "AI runtime logs:$LOGS_AI/ (edge runtime logs with the backend)"
+      ls -la "$LOGS_BACKEND" "$LOGS_FRONTEND" "$LOGS_AI"
+    fi ;;
+
+  test)
+    if [ ! -f "$SCRIPT_DIR/run-tests.sh" ]; then die "run-tests.sh not found"; fi
+    bash "$SCRIPT_DIR/run-tests.sh" ;;
+  help|--help|-h)
+    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//; /^$/d' ;;
+  *)
+    die "Unknown command '$CMD'. Run './scripts/storeye help'." ;;
+esac

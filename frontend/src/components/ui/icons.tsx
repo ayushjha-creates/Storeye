@@ -364,3 +364,68 @@ export const IconSparkle = (p: IconProps) =>
     ),
     ...p,
   })
+
+export const IconRoute = (p: IconProps) =>
+  base({
+    children: (
+      <>
+        <circle cx="6" cy="19" r="2" />
+        <circle cx="18" cy="5" r="2" />
+        <path d="M8 19h6a4 4 0 0 0 0-8H10a4 4 0 0 1 0-8h6" />
+      </>
+    ),
+    ...p,
+  })
+
+export const IconClock = (p: IconProps) =>
+  base({
+    children: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 3" />
+      </>
+    ),
+    ...p,
+  })
+
+export const IconTarget = (p: IconProps) =>
+  base({
+    children: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="5" />
+        <circle cx="12" cy="12" r="1" fill="currentColor" />
+      </>
+    ),
+    ...p,
+  })
+
+export const IconShield = (p: IconProps) =>
+  base({
+    children: (
+      <>
+        <path d="M12 3 4 7v5c0 5.5 3.8 10.7 8 12 4.2-1.3 8-6.5 8-12V7l-8-4Z" />
+        <path d="m8 12 3 3 5-5" />
+      </>
+    ),
+    ...p,
+  })
+
+export const IconLightbulb = (p: IconProps) =>
+  base({
+    children: (
+      <>
+        <path d="M9 18h6" />
+        <path d="M10 21h4" />
+        <path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V17h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z" />
+        <path d="M9.5 2.6a7 7 0 0 1 5 0" />
+      </>
+    ),
+    ...p,
+  })
+
+export const IconPlay = (p: IconProps) =>
+  base({
+    children: <path d="M7 4.5v15l12-7.5-12-7.5Z" />,
+    ...p,
+  })

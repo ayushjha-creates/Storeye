@@ -80,7 +80,14 @@ def _load_class_to_product(session: Session, store_id: Optional[str]) -> Dict[st
 
 
 class ObservationWriter:
-    """Persists EdgeEvents as observations through ObservationService."""
+    """Persists EdgeEvents as observations through ObservationService.
+
+    M19: the writer is also the single place where the Edge runtime talks to
+    the journey layer. TRACK_ASSOC / ZONE_ENTER / ZONE_EXIT events are piped to
+    the optional JourneyService (anonymous global sessions, track associations,
+    zone visits, transitions). PERSON observations keep their local track id
+    untouched and gain an anonymous `global_person_id` in `details` only.
+    """
 
     def __init__(
         self,
@@ -89,8 +96,10 @@ class ObservationWriter:
         store_id: Optional[str] = None,
         camera_id: Optional[str] = None,
         min_gap_seconds: float = 2.0,
+        journey_service=None,
     ) -> None:
         self._service = ObservationService(session)
+        self._journey = journey_service
         self._session = session
         self._store_id = _uuid_or_none(store_id)
         self._camera_id = _uuid_or_none(camera_id)
@@ -143,7 +152,22 @@ class ObservationWriter:
 
     # ------------------------------------------------------------------
     def _write_one(self, ev: EdgeEvent, now: datetime) -> bool:
-        """Write one event; if the camera FK is missing, fall back to None."""
+        """Write one event; falls back gracefully if a FK is missing."""
+        # -------------------------------------------------------------------
+        # M19 journey events — written through JourneyService, not
+        # ObservationService. Returns True even when journey_service is absent
+        # so the throttle accounting isn't disrupted.
+        # -------------------------------------------------------------------
+        if ev.kind == EventKind.TRACK_ASSOC:
+            return self._write_track_assoc(ev, now)
+        if ev.kind == EventKind.ZONE_ENTER:
+            return self._write_zone_enter(ev, now)
+        if ev.kind == EventKind.ZONE_EXIT:
+            return self._write_zone_exit(ev, now)
+
+        # -------------------------------------------------------------------
+        # Standard observation path.
+        # -------------------------------------------------------------------
         camera_id = self._camera_id or ev.camera_id
         first = self._event_kwargs(ev, now, camera_id)
         method = first.pop("_method")
@@ -178,12 +202,25 @@ class ObservationWriter:
         )
         if ev.kind == EventKind.PERSON:
             p = ev.payload
+            details: dict = {}
+            # M19: carry the anonymous global id + reid confidence + zone in
+            # the observation details for downstream journey queries.
+            gid = getattr(p, "global_person_id", None)
+            if gid is not None:
+                details["global_person_id"] = gid
+            reid_conf = getattr(p, "reid_confidence", None)
+            if reid_conf is not None:
+                details["reid_confidence"] = reid_conf
+            zone = getattr(p, "zone_id", None)
+            if zone is not None:
+                details["zone_id"] = zone
             return dict(
                 _method="record_person_observation",
                 **common,
                 track_id=p.track_id,
                 confidence=ev.confidence,
                 bbox=ev.payload.bbox_xyxy,
+                details=details or None,
             )
         if ev.kind == EventKind.PRODUCT:
             class_name = getattr(ev.payload, "class_name", None)
@@ -225,3 +262,66 @@ class ObservationWriter:
             observed_at=ev.timestamp,
             source=ev.source,
         )
+
+    # ------------------------------------------------------------------
+    # M19 — journey persistence (anonymous global sessions / visits).
+    # These write ONLY through JourneyService and NEVER through
+    # ObservationService, which stays observably pure.
+    # ------------------------------------------------------------------
+    def _write_track_assoc(self, ev: EdgeEvent, now: datetime) -> bool:
+        if self._journey is None:
+            return True
+        gid = getattr(ev.payload, "global_person_id", None)
+        confidence = getattr(ev.payload, "association_confidence", None) or "UNKNOWN"
+        if not gid or not self._store_id:
+            return False
+        try:
+            self._journey.upsert_track_association(
+                store_id=self._store_id,
+                global_person_id=gid,
+                camera_id=self._camera_id or ev.camera_id,
+                track_id=int(ev.payload.track_id or 0),
+                confidence=confidence,
+                timestamp=ev.timestamp,
+            )
+            return True
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Journey track_assoc write failed for %s", ev.camera_id)
+            return False
+
+    def _write_zone_enter(self, ev: EdgeEvent, now: datetime) -> bool:
+        if self._journey is None:
+            return True
+        if not self._store_id:
+            return False
+        confidence = getattr(ev.payload, "association_confidence", None) or "UNKNOWN"
+        try:
+            self._journey.open_zone_visit(
+                store_id=self._store_id,
+                global_person_id=ev.payload.global_person_id,
+                zone_id=ev.payload.zone_id,
+                camera_id=self._camera_id or ev.camera_id,
+                timestamp=ev.timestamp,
+                confidence=confidence,
+            )
+            return True
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Journey zone_enter write failed for %s", ev.camera_id)
+            return False
+
+    def _write_zone_exit(self, ev: EdgeEvent, now: datetime) -> bool:
+        if self._journey is None:
+            return True
+        if not self._store_id:
+            return False
+        try:
+            self._journey.close_zone_visit(
+                store_id=self._store_id,
+                global_person_id=ev.payload.global_person_id,
+                zone_id=ev.payload.zone_id,
+                timestamp=ev.timestamp,
+            )
+            return True
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("Journey zone_exit write failed for %s", ev.camera_id)
+            return False

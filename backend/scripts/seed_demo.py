@@ -14,12 +14,19 @@ The dataset is deliberately synthetic and deterministic:
     * alerts covering every lifecycle stage (OPEN / ACKNOWLEDGED / RESOLVED)
       created through the real AlertService (dedup + transitions respected)
     * persisted reconciliation snapshots within the 24h window
+    * M19 anonymous customer journeys (global person sessions + track
+      associations + zone visits + camera transitions) written through the
+      real JourneyService across the Entrance -> Grocery -> Billing zones
+    * M20 store-intelligence insights evaluated through the real
+      InsightEngine (inventory/expiry/shelf/customer-flow/camera-health/
+      store-health rules + alert sync) against the seeded data above
 
 Invariants respected:
     * stock is only mutated through InventoryService.receive_stock (or the
       direct opening adjustments shown by the standard seed), never by AI
     * batches described by Batch.status / expiries are the real Batch rows
     * alert timestamps/states go through AlertService transitions
+    * journeys are anonymous (opaque global ids only — never names/faces)
     * everything is labeled demo data by the frontend, never presented as truth
 
 Run (from the backend/ directory):
@@ -52,6 +59,10 @@ from app.models import (
     ALERT_REVIEW_REQUIRED,
     ALERT_SHORTAGE,
     ALERT_SURPLUS,
+    CONF_HIGH,
+    CONF_LOW,
+    CONF_MEDIUM,
+    CONF_UNKNOWN,
     OBS_PERSON,
     OBS_PRODUCT,
     REC_MATCH,
@@ -69,9 +80,13 @@ from app.models import (
     Bill,
     Camera,
     Customer,
+    GlobalPersonSession,
+    Insight,
     Inventory,
     InventoryMovement,
     Observation,
+    PersonCameraTransition,
+    PersonTrackAssociation,
     Planogram,
     PlanogramItem,
     Product,
@@ -82,9 +97,12 @@ from app.models import (
     Store,
     User,
     Zone,
+    ZoneVisit,
 )
 from app.services.alerts import AlertService
+from app.services.insights import InsightEngine
 from app.services.inventory import BatchService, InventoryService
+from app.services.journeys import JourneyService
 
 DEMO_STORE_NAME = "Storeye Demo Mart"
 
@@ -92,6 +110,12 @@ DEMO_STORE_NAME = "Storeye Demo Mart"
 def fixed(slug: str) -> uuid.UUID:
     """Deterministic identity for demo rows (stable across machines/runs)."""
     return uuid.uuid5(uuid.NAMESPACE_URL, "storeye-demo/" + slug)
+
+
+# Stable, well-known id for the demo store. Demo-scenario tooling refuses to
+# operate on any store whose id is not this one AND whose is_demo flag is not
+# True (belt-and-braces isolation; see app/services/demo).
+DEMO_STORE_ID = fixed("store")
 
 
 def _d(y: int, m: int, d: int):
@@ -300,6 +324,142 @@ def _offset_minutes(index: int, total: int, span_minutes: int = 23 * 60) -> floa
 # Seed
 # ---------------------------------------------------------------------------
 
+def _seed_journeys(
+    session: Session,
+    svc: JourneyService,
+    store_id: uuid.UUID,
+    cams: Dict[str, Camera],
+    zones: Dict[str, Zone],
+    now: datetime,
+) -> int:
+    """Seed deterministic anonymous journeys through the REAL JourneyService.
+
+    Four showcase journeys cover the M19 surface:
+        alice  HIGH   multi-camera (entrance -> aisle -> till), active
+        bob    UNKNOWN single-camera (aisle only), expired, mid visit
+        carol  MEDIUM multi-camera with 180s billing-zone dwell, expired
+        dave   LOW    single-camera (till), active
+
+    Idempotent: journeys already present (by global_person_id) are left alone.
+    """
+    gid = lambda slug: str(fixed("person:" + slug))  # noqa: E731
+    t = lambda minutes: now - timedelta(minutes=minutes)  # noqa: E731
+
+    seeded = 0
+
+    def _one(
+        slug: str,
+        confidence: str,
+        tracks: Sequence[Tuple[str, int, float, float]],
+        transitions: Sequence[Tuple[str, str, float, float]],
+        visits: Sequence[Tuple[str, str, float, float]],
+    ) -> int:
+        # guard: skip if already seeded
+        pid = gid(slug)
+        if session.scalar(
+            select(GlobalPersonSession).where(
+                GlobalPersonSession.store_id == store_id,
+                GlobalPersonSession.global_person_id == pid,
+            )
+        ) is not None:
+            return 0
+        for cam_key, track_id, start_min, last_min in tracks:
+            svc.upsert_track_association(
+                store_id=store_id,
+                global_person_id=pid,
+                camera_id=cams[cam_key].id,
+                track_id=track_id,
+                confidence=confidence,
+                timestamp=t(start_min),
+            )
+            svc.upsert_track_association(
+                store_id=store_id,
+                global_person_id=pid,
+                camera_id=cams[cam_key].id,
+                track_id=track_id,
+                confidence=confidence,
+                timestamp=t(last_min),
+            )
+        for from_key, to_key, gap_min, at_min in transitions:
+            svc.record_transition(
+                store_id=store_id,
+                global_person_id=pid,
+                from_camera_id=cams[from_key].id,
+                to_camera_id=cams[to_key].id,
+                timestamp=t(at_min),
+                confidence=confidence,
+                time_gap_seconds=gap_min * 60,
+            )
+        for cam_key, zone_key, enter_min, exit_min in visits:
+            svc.open_zone_visit(
+                store_id=store_id,
+                global_person_id=pid,
+                zone_id=zones[zone_key].id,
+                camera_id=cams[cam_key].id,
+                timestamp=t(enter_min),
+                confidence=confidence,
+            )
+            svc.close_zone_visit(
+                store_id=store_id,
+                global_person_id=pid,
+                zone_id=zones[zone_key].id,
+                timestamp=t(exit_min),
+            )
+        return 1
+
+    # alice: HIGH, multi-camera, active.
+    seeded += _one(
+        "alice", CONF_HIGH,
+        tracks=[
+            ("entrance", 100, 40, 32),
+            ("aisle", 5, 30, 26),
+            ("till", 77, 25, 22),
+        ],
+        transitions=[
+            ("entrance", "aisle", 5.0, 30),
+            ("aisle", "till", 2.0, 25),
+        ],
+        visits=[
+            ("entrance", "entrance", 40, 38),
+            ("aisle", "grocery", 30, 26),
+            ("till", "billing", 25, 22),
+        ],
+    )
+    # bob: UNKNOWN, single camera, expired sourcing visit.
+    seeded += _one(
+        "bob", CONF_UNKNOWN,
+        tracks=[("aisle", 12, 180, 165)],
+        transitions=[],
+        visits=[("aisle", "grocery", 180, 165)],
+    )
+    # carol: MEDIUM, two cameras, famous 180s billing dwell, expired.
+    seeded += _one(
+        "carol", CONF_MEDIUM,
+        tracks=[
+            ("entrance", 200, 125, 119),
+            ("till", 88, 118, 115),
+        ],
+        transitions=[
+            ("entrance", "aisle", 1.0, 119),
+            ("aisle", "till", 1.0, 118),
+        ],
+        visits=[("till", "billing", 118, 115)],
+    )
+    # dave: LOW, single camera, active quick visit.
+    seeded += _one(
+        "dave", CONF_LOW,
+        tracks=[("till", 66, 10, 6)],
+        transitions=[],
+        visits=[("till", "billing", 10, 9)],
+    )
+
+    # Flip sessions idle beyond the 30-minute timeout so bob/carol look
+    # 'expired' while alice/dave (seen in the last few minutes) stay active.
+    svc.mark_expired_sessions(store_id, now)
+
+    return seeded
+
+
 def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[str, int]:
     now = now or datetime.now(timezone.utc)
     counts: Dict[str, int] = {}
@@ -312,7 +472,9 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
         city="New Delhi",
         phone="011-4012-3456",
         timezone="Asia/Kolkata",
+        is_demo=True,
     )
+    store.is_demo = True
     counts["stores"] = 1
 
     _goc(
@@ -342,6 +504,21 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
         store_id=store.id, name="Beverages",
         description="Cold beverages, staples & oils",
     )
+    zone_entrance = _goc(
+        session, Zone, fixed("zone:entrance"),
+        store_id=store.id, name="Entrance",
+        description="Entry & exit flow area",
+    )
+    zone_grocery = _goc(
+        session, Zone, fixed("zone:grocery"),
+        store_id=store.id, name="Grocery & Staples",
+        description="Main grocery & staples aisle",
+    )
+    zone_billing = _goc(
+        session, Zone, fixed("zone:billing"),
+        store_id=store.id, name="Billing Counter",
+        description="Checkout & billing zone",
+    )
     shelf_a1 = _goc(
         session, Shelf, fixed("shelf:A1"),
         store_id=store.id, zone_id=zone_snacks.id, code="A1",
@@ -368,7 +545,7 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
         description="End-cap promotion display",
     )
     shelves = {"A1": shelf_a1, "A2": shelf_a2, "B1": shelf_b1, "B2": shelf_b2, "E1": shelf_e1}
-    counts["zones"] = 2
+    counts["zones"] = 5
     counts["shelves"] = 5
 
     # --- Products -------------------------------------------------------
@@ -467,7 +644,25 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
         store_id=store.id, name="Demo Entrance Cam",
         location="Main Entrance",
         camera_type="file", is_active=True,
-        config={"kind": "person", "person_detection": True},
+        config={
+            "kind": "person", "person_detection": True,
+            "zone_id": str(zone_entrance.id),
+            "next_cameras": [str(fixed("cam:aisle"))],
+            "reid": {"embedding_refresh_interval_seconds": 10},
+        },
+        exclude=("config",),
+    )
+    aisle_cam = _goc(
+        session, Camera, fixed("cam:aisle"),
+        store_id=store.id, name="Demo Aisle Cam",
+        location="Main Grocery & Staples Aisle",
+        camera_type="file", is_active=True,
+        config={
+            "kind": "person", "person_detection": True,
+            "zone_id": str(zone_grocery.id),
+            "next_cameras": [str(fixed("cam:till"))],
+            "reid": {"embedding_refresh_interval_seconds": 10},
+        },
         exclude=("config",),
     )
     till_cam = _goc(
@@ -475,7 +670,12 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
         store_id=store.id, name="Demo Till Cam",
         location="Billing Counter",
         camera_type="file", is_active=True,
-        config={"kind": "person", "person_detection": True},
+        config={
+            "kind": "person", "person_detection": True,
+            "zone_id": str(zone_billing.id),
+            "next_cameras": [],
+            "reid": {"embedding_refresh_interval_seconds": 10},
+        },
         exclude=("config",),
     )
     roof_cam = _goc(
@@ -486,7 +686,7 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
         config={"kind": "person", "person_detection": True},
         exclude=("config",),
     )
-    counts["cameras"] = 4
+    counts["cameras"] = 5
 
     # --- Planogram (active expectation) ------------------------
     planogram = _goc(
@@ -547,6 +747,14 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
             ) is not None:
                 person_created += 1
     counts["observations"] = counts.get("observations", 0) + person_created
+
+    # --- M19 Anonymous customer journeys ------------------------------
+    # Deterministic, idempotent; written through the real JourneyService.
+    journey_svc = JourneyService(session)
+    cams = {"entrance": entrance_cam, "aisle": aisle_cam, "till": till_cam}
+    zones = {"entrance": zone_entrance, "grocery": zone_grocery, "billing": zone_billing}
+    journeys_seeded = _seed_journeys(session, journey_svc, store.id, cams, zones, now)
+    counts["journeys"] = journeys_seeded
 
     # --- Sales + bills -----------------------------------------
     sales_created = 0
@@ -646,7 +854,7 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
         ).first()
         if existing is not None:
             return 0
-        alert, _created = alert_svc.create_alert(
+        alert, created = alert_svc.create_alert(
             store_id=store.id,
             alert_type=alert_type,
             severity=severity,
@@ -659,6 +867,8 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
             source_type="demo",
             source_id=source_id,
         )
+        if not created:
+            return 0
         if then == "acknowledged":
             alert_svc.acknowledge(alert, at=now - timedelta(hours=1))
         elif then == "resolved":
@@ -728,6 +938,20 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
         )
     )
 
+    # --- M20 store intelligence insights -------------------------------
+    # Evaluate immediately while the demo data above is fresh. The engine is
+    # idempotent (one active insight per store/type/entity), deterministically
+    # timestamps against the same `now` used for the seed, and only reads the
+    # inventory/batches/sales/observations/visits we just wrote.
+
+    insight_res = InsightEngine(session).evaluate(
+        store.id, now=now, reference_date=now.date()
+    )
+    counts["insights"] = len(insight_res.insights)
+    counts["insights_alerts"] = (
+        insight_res.alerts_created + insight_res.alerts_updated
+    )
+
     session.commit()
     return counts
 
@@ -754,8 +978,13 @@ def reset_demo_store(session: Session) -> int:
     )]
 
     session.execute(delete(Observation).where(Observation.store_id == store_id))
+    session.execute(delete(Insight).where(Insight.store_id == store_id))
     session.execute(delete(ReconciliationResult).where(ReconciliationResult.store_id == store_id))
     session.execute(delete(Alert).where(Alert.store_id == store_id))
+    session.execute(delete(PersonTrackAssociation).where(PersonTrackAssociation.store_id == store_id))
+    session.execute(delete(PersonCameraTransition).where(PersonCameraTransition.store_id == store_id))
+    session.execute(delete(ZoneVisit).where(ZoneVisit.store_id == store_id))
+    session.execute(delete(GlobalPersonSession).where(GlobalPersonSession.store_id == store_id))
     session.execute(delete(InventoryMovement).where(InventoryMovement.store_id == store_id))
     session.execute(delete(Inventory).where(Inventory.store_id == store_id))
     session.execute(delete(Batch).where(Batch.store_id == store_id))

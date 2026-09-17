@@ -318,7 +318,14 @@ def test_real_person_smoke(tmp_path):
     rt.add_camera(cfg)
     try:
         rt.start_camera("real")
-        time.sleep(5.0)
+        deadline = time.time() + 20.0
+        frames = 0
+        while time.time() < deadline:
+            st = rt.camera_status("real")
+            frames = st["frames_processed"]
+            if frames >= 1:
+                break
+            time.sleep(0.25)
         st = rt.camera_status("real")
         assert st["frames_processed"] >= 1
         assert st["connection_ok"] is True

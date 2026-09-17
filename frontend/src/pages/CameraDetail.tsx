@@ -5,6 +5,7 @@ import { DetectionOverlay } from '../components/camera/DetectionOverlay'
 import { AnalysisPanel } from '../components/camera/AnalysisPanel'
 import { DetectionStats } from '../components/camera/DetectionStats'
 import { ObservationTimeline } from '../components/camera/ObservationTimeline'
+import { ReIdPanel } from '../components/camera/ReIdPanel'
 import { Badge } from '../components/ui/Badge'
 import { ErrorMessage } from '../components/ui/ErrorState'
 import { Spinner } from '../components/ui/Spinner'
@@ -412,6 +413,9 @@ export function CameraDetailPage() {
           stock is moved — nothing is committed automatically.
         </p>
       </Card>
+
+      {/* M19: person Re-ID for this camera (anonymous, cross-camera continuity) */}
+      <ReIdPanel observations={observations} />
     </div>
   )
 }

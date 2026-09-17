@@ -75,12 +75,23 @@ def _config_from_camera(cam: Camera) -> CameraConfig:
         frame_skip=int(pid.get("frame_skip", 0)),
         min_observation_gap_seconds=float(pid.get("min_observation_gap_seconds", 2.0)),
     )
+
+    # M19 journey extensions (all optional; validated by schemas.camera).
+    zones_raw = cfg.get("zones") or []
+    camera_zones = [
+        {"zone_id": str(z.get("zone_id")), "bbox": list(z.get("bbox") or [])}
+        for z in zones_raw
+        if isinstance(z, dict) and z.get("zone_id")
+    ]
     return CameraConfig(
         camera_id=str(cam.id),
         kind=kind,
         source=source,
         name=cam.name,
         pipelines=pipelines,
+        zone_id=str(cfg["zone_id"]) if cfg.get("zone_id") else None,
+        camera_zones=camera_zones,
+        next_cameras=[str(c) for c in (cfg.get("next_cameras") or []) if c],
     )
 
 
@@ -101,8 +112,10 @@ def _ensure_configured(db: Session, camera_id: UUID) -> None:
             raise HTTPException(
                 status_code=409, detail="Camera is not active"
             )
+        # Store context FIRST so the shared Re-ID manager is store-scoped
+        # before its cameras (and their transition graph) are registered.
+        runtime.set_store(_first_store_id(db))
         runtime.add_camera(_config_from_camera(cam))
-    runtime.set_store(_first_store_id(db))
 
 
 def _first_store_id(db: Session) -> Optional[str]:

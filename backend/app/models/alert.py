@@ -126,7 +126,7 @@ class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=False
     )
     last_detected_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
     acknowledged_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

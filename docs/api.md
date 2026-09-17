@@ -118,13 +118,26 @@ the scan resolution.
 - `GET /api/ready` — readiness probe.
 - `GET /api/metrics` — runtime metrics.
 
-### Demo showcase (M18; guarded, idempotent re-seed)
-- `POST /api/demo/reset` — re-seeds the deterministic `Storeye Demo Mart` dataset.
-  Requires header `X-Demo-Reset-Key: <DEMO_RESET_KEY>` (server-side env; default
-  `storeye-demo-reset` used **only** in development). Without/with a wrong key → 403.
-  Calls `scripts/seed_demo.reset_and_seed()` which deletes the demo store's data and
-  re-creates an identical deterministic dataset (fixed UUIDs, see below), so repeated
-  calls converge to exactly the same state — safe for demos.
+### Demo & Scenario Engine (M21; extends the M18 showcase, guarded)
+Read endpoints (open while `DEMO_MODE` is on; otherwise 404):
+- `GET  /api/demo/scenarios` — the 12-scenario deterministic catalog + active key.
+- `GET  /api/demo/scenarios/{key}` — one scenario (404 for unknown key).
+- `GET  /api/demo/status` — active scenario, demo-store id/flag, last reset/activate times.
+
+Mutating endpoints (require header `X-Demo-Reset-Key: <DEMO_RESET_KEY>`, server-side
+env; default `storeye-demo-reset` used **only** in development; wrong/missing → 403):
+- `POST /api/demo/scenarios/{key}/activate` — reset to baseline → apply the scenario
+  overlay → re-evaluate M20 insights (incl. the cached `STORE_HEALTH` summary) and
+  sync M16 alerts → persist `demo_scenario_state`. Unknown key → 404; demo store
+  missing → 503; non-demo store → 403.
+- `POST /api/demo/reset` — activate `NORMAL_STORE` (delegates to the M18
+  `scripts/seed_demo.reset_and_seed()` baseline). Repeated calls are idempotent.
+
+All operations resolve the demo store by its stable id and refuse unless
+`Store.is_demo is True` (service-layer guard), so real store data can never be
+modified by demo tooling. The 12 keys are: `NORMAL_STORE, LOW_STOCK, OUT_OF_STOCK,
+EXPIRY_RISK, LOW_SHELF_BACKSTOCK, MISPLACEMENT, HIGH_TRAFFIC, HIGH_DWELL,
+MULTI_CAMERA_JOURNEY, CAMERA_OFFLINE, SMART_RECEIVING, COMBINED_CRISIS`.
 
 ## Error example (duplicate SKU)
 ```

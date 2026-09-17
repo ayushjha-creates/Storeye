@@ -87,6 +87,7 @@ type ResponseConstructor = {
 
 interface RequestOptions {
   timeoutMs?: number
+  headers?: Record<string, string>
 }
 
 type Params = Record<string, unknown>
@@ -129,6 +130,7 @@ export async function request<T>(
   const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`
+  if (options.headers) Object.assign(headers, options.headers)
 
   let res: Response
   try {

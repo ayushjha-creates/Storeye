@@ -12,7 +12,10 @@ Chain (linear):
     -> acf54c2aa5f9 (reconciliation results)
     -> b7f3d11e4a59 (products.ai_classes)
     -> d9e4a30f8b21 (alerts)
-    -> c4f5a6b7c8d9 (products.barcode)                    <- head
+    -> c4f5a6b7c8d9 (products.barcode)
+    -> d96754c9650a (anonymous journeys tables)
+    -> 3459a7512c9d (store intelligence insights)
+    -> 19c835a1a344 (demo scenario state + stores.is_demo)  <- head
 
 Deliberately runs on the public schema of storeye_test only; it drops and
 recreates that schema, so it can never touch the production `storeye` database
@@ -31,7 +34,7 @@ from tests.conftest import resolve_test_database_url
 
 pytestmark = pytest.mark.pg
 
-EXPECTED_HEAD = "c4f5a6b7c8d9"
+EXPECTED_HEAD = "19c835a1a344"
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -56,6 +59,12 @@ EXPECTED_TABLES = {
     "reconciliation_results",
     "alerts",
     "planograms",
+    "global_person_sessions",
+    "person_track_associations",
+    "zone_visits",
+    "person_camera_transitions",
+    "insights",
+    "demo_scenario_state",
     "alembic_version",
 }
 

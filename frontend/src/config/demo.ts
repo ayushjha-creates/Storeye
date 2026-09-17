@@ -17,10 +17,11 @@ export const DEMO = {
   email: env.VITE_DEMO_EMAIL?.trim() || 'demo@storeye.local',
   password: env.VITE_DEMO_PASSWORD?.trim() || 'StoreyeDemo@123',
   /**
-   * Dev-only re-seed key. The operator's real key lives on the backend in the
-   * DEMO_RESET_KEY env var; the UI never ships it. Keep this empty in
-   * production builds.
+   * Demo-control key sent as `X-Demo-Reset-Key`. The backend reads the real
+   * value from its own `DEMO_RESET_KEY` env var; this default matches the
+   * backend dev default so the local Showcase works out of the box. Override
+   * (or blank it) via `VITE_DEMO_RESET_KEY` for any shared deployment.
    */
-  resetKey: env.VITE_DEMO_RESET_KEY?.trim() || '',
+  resetKey: env.VITE_DEMO_RESET_KEY?.trim() || 'storeye-demo-reset',
   resetUrl: '/api/demo/reset',
 } as const

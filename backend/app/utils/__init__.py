@@ -1,0 +1,1 @@
+"""Shared, dependency-light utilities (offline rendering, hashing, …)."""

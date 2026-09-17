@@ -52,15 +52,22 @@ Baseline demo data: **22 insights / 8 alerts / 5 insight-generated alerts /
 
 1. Open the dashboard and sign in with the demo account:
    - email `demo@storeye.local` · password `StoreyeDemo@123`
-2. Open the **Demo** view (guided scenario player). Twelve deterministic
+2. Open the **Demo** view (guided scenario player). Thirteen deterministic
    scenarios are available, e.g. `LOW_STOCK`, `OUT_OF_STOCK`, `EXPIRY_RISK`,
-   `HIGH_TRAFFIC`, `MULTI_CAMERA_JOURNEY`, `SMART_RECEIVING`, `CAMERA_OFFLINE`,
-   `COMBINED_CRISIS`.
+   `HIGH_TRAFFIC`, `MULTI_CAMERA_JOURNEY`, `SMART_RECEIVING`,
+   `MOBILE_USB_RECEIVING`, `CAMERA_OFFLINE`, `COMBINED_CRISIS`.
 3. **Activate** a scenario → it mutates only the demo store (guarded by
    `X-Demo-Reset-Key`; real stores are never touched).
 4. Watch the dashboards/alerts/insights update.
 5. **Reset** from the demo view (or `./scripts/storeye demo-reset`) to return to
    the identical baseline.
+
+> **M25 mobile intake demo:** activate `MOBILE_USB_RECEIVING`, open
+> **Inventory → Smart Batch Receiving**, and click **Queue demo package** on the
+> "Mobile Capture · USB intake" card (pick Aashirvaad Atta 5kg or Amul Milk 1L).
+> The watermarked demo pack is dropped into the intake folder through the real
+> file watcher, decoded by the real OCR pipeline, and shows up as a
+> `REVIEW_REQUIRED` candidate you can confirm. See `docs/mobile_usb_intake.md`.
 
 ## 6. Restart / stop / clean up
 

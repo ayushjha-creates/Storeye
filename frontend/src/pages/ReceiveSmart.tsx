@@ -7,11 +7,15 @@ import { ErrorMessage, EmptyState } from '../components/ui/ErrorState'
 import { Spinner } from '../components/ui/Spinner'
 import { productApi } from '../lib/api/products'
 import { batchIntakeApi } from '../lib/api/batchIntake'
+import { mobileIntakeApi } from '../lib/api/mobileIntake'
 import { storeApi } from '../lib/api/zone'
-import { IconCamera, IconCheck, IconScan } from '../components/ui/icons'
+import { IconAlert, IconCamera, IconCheck, IconRefresh, IconScan } from '../components/ui/icons'
 import type {
   BatchReceipt,
+  BatchScanCandidate,
   BatchScanResponse,
+  MobileIntakeJob,
+  MobileIntakeStatus,
   Product,
 } from '../lib/api/types'
 
@@ -82,6 +86,15 @@ export function ReceiveSmartPage() {
   const [receipt, setReceipt] = useState<BatchReceipt | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // M25: mobile-to-edge USB intake watcher mirror.
+  const [intakeStatus, setIntakeStatus] = useState<MobileIntakeStatus | null>(null)
+  const [intakeJobs, setIntakeJobs] = useState<MobileIntakeJob[]>([])
+  const [intakeError, setIntakeError] = useState<string | null>(null)
+  const [intakeNote, setIntakeNote] = useState<string | null>(null)
+  const [queuingDemo, setQueuingDemo] = useState(false)
+  const [demoProduct, setDemoProduct] = useState('aashirvaad')
+  const [activeIntakeJob, setActiveIntakeJob] = useState<string | null>(null)
+
   // Editable candidate fields (prefilled after scan, always editable).
   const [productId, setProductId] = useState('')
   const [batchNumber, setBatchNumber] = useState('')
@@ -112,6 +125,30 @@ export function ReceiveSmartPage() {
     load()
   }, [load])
 
+  // Poll the intake watcher (M25). Stops on the next queued user action so the
+  // panel reflects the file system without requiring a browser refresh.
+  useEffect(() => {
+    let alive = true
+    let timer: number | undefined
+    const tick = async () => {
+      try {
+        const [st, jobs] = await Promise.all([mobileIntakeApi.status(), mobileIntakeApi.jobs()])
+        if (!alive) return
+        setIntakeStatus(st)
+        setIntakeJobs(jobs.items)
+        setIntakeError(null)
+      } catch {
+        // Quietly offline — the panel keeps showing the last-known state.
+      }
+    }
+    void tick()
+    timer = window.setInterval(tick, 3500)
+    return () => {
+      alive = false
+      if (timer !== undefined) window.clearInterval(timer)
+    }
+  }, [])
+
   // Clean up the object URL when the preview is replaced/unmounted.
   useEffect(() => {
     return () => {
@@ -138,6 +175,17 @@ export function ReceiveSmartPage() {
     setStage('capture')
   }
 
+  // Prefill the editable form from any accepted/rejected scan candidate.
+  const applyCandidate = useCallback((c: BatchScanCandidate) => {
+    setProductId(c.product_id ?? '')
+    setBatchNumber(c.batch_number ?? '')
+    setManufacturingDate(c.manufacturing_date ?? '')
+    setExpiryDate(c.expiry_date ?? '')
+    setExpiryPrecision(c.expiry_date_precision ?? 'day')
+    setMrp(c.mrp ?? '')
+    setStage('review')
+  }, [])
+
   const runScan = async () => {
     if (!file) return
     setStage('scanning')
@@ -145,19 +193,55 @@ export function ReceiveSmartPage() {
     try {
       const result = await batchIntakeApi.scan(file, storeId)
       setScan(result)
-      // Prefill the editable form from the candidate.
-      const c = result.candidate
-      setProductId(c.product_id ?? '')
-      setBatchNumber(c.batch_number ?? '')
-      setManufacturingDate(c.manufacturing_date ?? '')
-      setExpiryDate(c.expiry_date ?? '')
-      setExpiryPrecision(c.expiry_date_precision ?? 'day')
-      setMrp(c.mrp ?? '')
-      setStage('review')
+      applyCandidate(result.candidate)
     } catch (err) {
       setScanError(err)
       setScan(null)
       setStage('review')
+    }
+  }
+
+  // M25: a USB-copied photo was already scanned by the edge watcher; load its
+  // candidate into the same review form. The photo bytes never reach the browser.
+  const openIntakeJob = (job: MobileIntakeJob) => {
+    if (!job.candidate) {
+      setIntakeError(`Job ${job.filename} has no readable candidate.`)
+      return
+    }
+    setScan({
+      store_id: null,
+      acceptable: job.acceptable === true,
+      reason: job.reason ?? 'Candidate read from USB intake',
+      candidate: job.candidate,
+    })
+    applyCandidate(job.candidate)
+    setImageUrl(null)
+    setFile(null)
+    setScanError(null)
+    setConfirmError(null)
+    setReceipt(null)
+    setQuantity('')
+    setActiveIntakeJob(job.job_id)
+    setIntakeError(null)
+  }
+
+  const queueDemoPackage = async () => {
+    setQueuingDemo(true)
+    setIntakeError(null)
+    setIntakeNote(null)
+    try {
+      const res = await mobileIntakeApi.queueDemoPackage(demoProduct)
+      setIntakeNote(
+        `${res.product?.product_name ?? res.filename} queued — the watcher will decode it in a moment.`,
+      )
+    } catch (err) {
+      setIntakeError(
+        err instanceof Error
+          ? err.message
+          : 'Demo queue unavailable (only works in demo mode on the edge node).',
+      )
+    } finally {
+      setQueuingDemo(false)
     }
   }
 
@@ -214,6 +298,116 @@ export function ReceiveSmartPage() {
           ← Inventory
         </Link>
       </div>
+
+      <Card
+        title="Mobile Capture · USB intake"
+        subtitle="Photos copied from your phone over USB are decoded automatically on this edge node — nothing reaches the cloud"
+      >
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+            <Badge tone={intakeStatus?.monitoring ? 'green' : 'gray'}>
+              {intakeStatus?.monitoring ? 'Watcher on' : 'Watcher off'}
+            </Badge>
+            <span>
+              {intakeStatus?.monitoring && intakeStatus.watcher_alive
+                ? `Listening in ${intakeStatus.intake_dir}`
+                : intakeStatus && !intakeStatus.watcher_alive
+                  ? 'Watcher thread stopped — restart the backend'
+                  : 'Reachable when the edge backend + watcher are running'}
+            </span>
+            <span className="ml-auto flex items-center gap-3">
+              <span>{intakeStatus?.scans ?? 0} scanned</span>
+              <span>{intakeStatus?.duplicates ?? 0} duplicates</span>
+              <span>{intakeStatus?.rejected ?? 0} rejected</span>
+            </span>
+          </div>
+
+          {intakeJobs.length > 0 ? (
+            <ul className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-100 text-sm">
+              {intakeJobs
+                .filter((j) => j.state === 'REVIEW_REQUIRED' || j.state === 'FAILED')
+                .slice(0, 6)
+                .map((job) => (
+                  <li key={job.job_id} className="flex items-center justify-between gap-2 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-2 truncate font-medium text-gray-800">
+                        <span className="truncate">{job.filename}</span>
+                        {job.demo ? <Badge tone="blue">demo</Badge> : null}
+                        {job.duplicate_of ? <Badge tone="gray">duplicate</Badge> : null}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-gray-500">
+                        {job.state === 'REVIEW_REQUIRED'
+                          ? (job.candidate?.product_name ?? job.candidate?.barcode ?? 'Awaiting candidate')
+                          : (job.reason ?? job.error ?? job.state)}
+                      </p>
+                    </div>
+                    {job.state === 'REVIEW_REQUIRED' ? (
+                      <Button
+                        kind="secondary"
+                        onClick={() => openIntakeJob(job)}
+                        disabled={activeIntakeJob === job.job_id}
+                      >
+                        {activeIntakeJob === job.job_id ? 'Loaded' : 'Review candidate'}
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-gray-500">
+              No photos waiting. Open the Storeye intake folder on this computer and copy package
+              photos here — the phone is your camera, the laptop stays the edge computer.
+            </p>
+          )}
+
+          {intakeError ? (
+            <div className="flex items-start gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-red-700">
+              <IconAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{intakeError}</span>
+            </div>
+          ) : null}
+          {intakeNote ? (
+            <p className="flex items-center gap-1.5 text-xs text-emerald-700">
+              <IconCheck className="h-3.5 w-3.5" /> {intakeNote}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3">
+            <p className="text-xs text-gray-400">
+              Human review + quantity still required — OCR output is always a candidate.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {activeIntakeJob ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveIntakeJob(null)}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
+                >
+                  <IconRefresh className="h-3.5 w-3.5" /> Clear active job
+                </button>
+              ) : null}
+              <select
+                value={demoProduct}
+                onChange={(e) => setDemoProduct(e.target.value)}
+                aria-label="Demo package product"
+                className={inputCls}
+              >
+                <option value="aashirvaad">Aashirvaad Atta 5kg</option>
+                <option value="amul">Amul Milk 1L</option>
+              </select>
+              <Button kind="secondary" onClick={queueDemoPackage} disabled={queuingDemo}>
+                {queuingDemo
+                  ? 'Queuing…'
+                  : (
+                    <>
+                      <IconCamera className="mr-1.5 inline-block h-4 w-4" /> Queue demo package
+                    </>
+                  )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
 
       <Stepper stage={stage} />
 

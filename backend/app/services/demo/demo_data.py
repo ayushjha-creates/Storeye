@@ -27,6 +27,7 @@ SCENARIO_HIGH_DWELL = "HIGH_DWELL"
 SCENARIO_MULTI_CAMERA_JOURNEY = "MULTI_CAMERA_JOURNEY"
 SCENARIO_CAMERA_OFFLINE = "CAMERA_OFFLINE"
 SCENARIO_SMART_RECEIVING = "SMART_RECEIVING"
+SCENARIO_MOBILE_USB_RECEIVING = "MOBILE_USB_RECEIVING"
 SCENARIO_COMBINED_CRISIS = "COMBINED_CRISIS"
 
 DEFAULT_SCENARIO = SCENARIO_NORMAL
@@ -201,6 +202,25 @@ SCENARIOS: List[ScenarioInfo] = [
         expected=[
             "Real M17 scan/review/confirm workflow",
             "Atomic BatchService + InventoryService commit",
+        ],
+        focus_path="/app/receive",
+    ),
+    ScenarioInfo(
+        key=SCENARIO_MOBILE_USB_RECEIVING,
+        name="Mobile USB Receiving",
+        description=(
+            "Baseline restored and a watermarked demo package queued into the "
+            "USB intake folder so the presenter can run the REAL end-to-end "
+            "mobile intake flow: phone photo arrives -> watcher detects it -> "
+            "real barcode + OCR + expiry parse -> human review -> confirm -> "
+            "inventory updated."
+        ),
+        category="receiving",
+        expected=[
+            "Demo package appears in the intake monitor",
+            "Real scan -> candidate (barcode/OCR/expiry, never faked)",
+            "Human review with typed quantity",
+            "Confirmation commits batch + movement via M17",
         ],
         focus_path="/app/receive",
     ),

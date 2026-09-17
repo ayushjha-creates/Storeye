@@ -57,6 +57,8 @@ class DemoStatusRead(BaseModel):
 
 
 class DemoActivationResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     ok: bool = True
     active_key: str
     scenario: dict[str, Any]
@@ -64,6 +66,8 @@ class DemoActivationResult(BaseModel):
     metrics: dict[str, Any] = {}
     evaluation: dict[str, Any] = {}
     activated_at: datetime
+    # M25: only present when a demo package was queued into the USB intake.
+    mobile_intake_demo: Optional[dict[str, Any]] = None
 
     @classmethod
     def from_engine(cls, payload: dict[str, Any]) -> "DemoActivationResult":

@@ -57,6 +57,22 @@ class Settings(BaseSettings):
     # Guard for demo mutating endpoints (reset/activate). Override per deployment.
     DEMO_RESET_KEY: str = "storeye-demo-reset"
 
+    # ------------------------------------------------------------------
+    # Mobile-to-Edge USB Intake (M25).
+    # ------------------------------------------------------------------
+    # Directory a phone is copied into over USB. Empty => `<data>/intake`.
+    STOREYE_INTAKE_DIR: str = ""
+    # Hard ceiling for pushed photos (bytes); aligns with the M17 reading cap.
+    INTAKE_MAX_MB: int = 15
+    # How long a file's size must stay unchanged before it is read (a phone
+    # copies in chunks; a still-growing file must never be processed).
+    INTAKE_STABILITY_SECONDS: float = 2.0
+    # Watcher poll cadence.
+    INTAKE_WATCH_INTERVAL_SECONDS: float = 1.0
+    # Processed/failed intake files older than this are swept away; active
+    # (review-pending) photos are never removed.
+    INTAKE_RETENTION_DAYS: int = 7
+
     # Retail intelligence defaults (override via env / constructor args).
     # A product is LOW_STOCK when available_quantity <= LOW_STOCK_THRESHOLD
     # (zero is included).
@@ -218,12 +234,21 @@ class Settings(BaseSettings):
         "INSIGHT_DWELL_WINDOW_HOURS",
         "INSIGHT_REFRESH_INTERVAL_SECONDS",
         "INSIGHT_EXPIRY_TTL_HOURS",
+        "INTAKE_MAX_MB",
+        "INTAKE_RETENTION_DAYS",
     )
     @classmethod
     def _validate_non_negative(cls, v, info):
         if float(v) < 0:
             raise ValueError(f"{info.field_name} must be >= 0, got {v}")
         return v
+
+    @field_validator("INTAKE_STABILITY_SECONDS", "INTAKE_WATCH_INTERVAL_SECONDS")
+    @classmethod
+    def _validate_positive_seconds(cls, v: float, info) -> float:
+        if float(v) <= 0:
+            raise ValueError(f"{info.field_name} must be > 0, got {v}")
+        return float(v)
 
     @field_validator("HIGH_TRAFFIC_VISITS_FACTOR")
     @classmethod
@@ -273,6 +298,14 @@ class Settings(BaseSettings):
         if env_db:
             return Path(env_db)
         return self.DATA_DIR / "edgeretail.db"
+
+    @property
+    def INTAKE_ROOT(self) -> Path:
+        """Root directory of the USB intake bridge (default `<data>/intake`)."""
+        env_dir = os.getenv("STOREYE_INTAKE_DIR") or self.STOREYE_INTAKE_DIR
+        if env_dir:
+            return Path(env_dir).expanduser()
+        return self.DATA_DIR / "intake"
 
 
 @lru_cache

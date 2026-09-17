@@ -85,10 +85,11 @@ def test_list_scenarios_endpoint(client):
     assert r.status_code == 200
     body = r.json()
     assert body["demo_mode"] is True
-    assert len(body["scenarios"]) == 12
+    assert len(body["scenarios"]) == 13
     keys = {s["key"] for s in body["scenarios"]}
     assert demo_data.SCENARIO_NORMAL in keys
     assert demo_data.SCENARIO_COMBINED_CRISIS in keys
+    assert demo_data.SCENARIO_MOBILE_USB_RECEIVING in keys
 
 
 def test_get_scenario_endpoint_and_404(client):

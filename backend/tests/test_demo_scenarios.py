@@ -109,7 +109,7 @@ def test_list_scenarios_catalog(db):
     infos = DemoScenarioEngine(db).list_scenarios()
     keys = {i.key for i in infos}
     assert keys == set(demo_data.VALID_SCENARIO_KEYS)
-    assert len(infos) == 12
+    assert len(infos) == 13
     assert all(i.name and i.description and i.expected for i in infos)
 
 

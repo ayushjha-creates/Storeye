@@ -48,6 +48,10 @@ from ..services.batch_intake.errors import (
     OcrUnavailableError,
     ScanValidationError,
 )
+from ..services.mobile_intake.errors import (
+    IntakeJobNotFound,
+    MobileIntakeError,
+)
 
 
 def _payload(msg: str, etype: str, loc=None) -> dict:
@@ -149,3 +153,12 @@ def _register_handlers(app: FastAPI) -> None:
     @app.exception_handler(BatchIntakeError)
     async def _batch_generic(_req: Request, exc: BatchIntakeError):
         return _error(500, str(exc), "INTERNAL_ERROR")
+
+    # ---- 404/conflict: mobile-intake domain errors ----
+    @app.exception_handler(IntakeJobNotFound)
+    async def _intake_job_not_found(_req: Request, exc: IntakeJobNotFound):
+        return _error(404, str(exc), "NOT_FOUND")
+
+    @app.exception_handler(MobileIntakeError)
+    async def _intake_generic(_req: Request, exc: MobileIntakeError):
+        return _error(409, str(exc), "CONFLICT")

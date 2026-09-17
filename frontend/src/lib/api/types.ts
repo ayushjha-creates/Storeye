@@ -784,6 +784,7 @@ export type DemoScenarioKey =
   | 'MULTI_CAMERA_JOURNEY'
   | 'CAMERA_OFFLINE'
   | 'SMART_RECEIVING'
+  | 'MOBILE_USB_RECEIVING'
   | 'COMBINED_CRISIS'
 
 export interface DemoScenario {
@@ -840,4 +841,63 @@ export interface DemoActivationResult {
   metrics: Record<string, unknown>
   evaluation: DemoEvaluationResult
   activated_at: string
+  mobile_intake_demo?: {
+    queued?: boolean
+    filename?: string
+    note?: string
+    error?: string
+  } | null
+}
+
+// ── M25: Mobile-to-Edge USB Intake Bridge ────────────────────────────────
+// Mirrors backend/app/schemas/mobile_intake.py. The bridge is read-mostly:
+// scanning happens in a watcher; the UI only reviews/confirms. Confirmation
+// continues through the existing M17 endpoint (batchIntakeApi.confirm).
+
+export type MobileIntakeJobState =
+  | 'DETECTED'
+  | 'WAITING_FOR_COPY'
+  | 'PROCESSING'
+  | 'SCANNING'
+  | 'OCR_PROCESSING'
+  | 'REVIEW_REQUIRED'
+  | 'CONFIRMED'
+  | 'PROCESSED'
+  | 'FAILED'
+
+export interface MobileIntakeStatus {
+  monitoring: boolean
+  watcher_alive: boolean
+  intake_dir: string
+  processing_dir: string
+  processed_dir: string
+  failed_dir: string
+  watched_at: string | null
+  started_at: string | null
+  scans: number
+  duplicates: number
+  rejected: number
+  active_jobs: number
+  failed_jobs: number
+}
+
+export interface MobileIntakeJob {
+  job_id: string
+  filename: string
+  size: number
+  state: MobileIntakeJobState
+  demo: boolean
+  duplicate_of: string | null
+  error: string | null
+  note: string | null
+  acceptable: boolean | null
+  reason: string | null
+  candidate: BatchScanCandidate | null
+  created_at: string
+  updated_at: string
+}
+
+export interface MobileIntakeJobList {
+  items: MobileIntakeJob[]
+  count: number
 }

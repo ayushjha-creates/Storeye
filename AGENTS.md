@@ -1,11 +1,14 @@
 # Status Summary
 
 ## Objective
-- **M23 — Storeye Deployment Packaging & One-Click Edge Setup** (IN PROGRESS).
-  Not a feature milestone: one-click provisioning (setup/migrate/seed/
-  demo-reset/doctor/start/stop/status/backup/restore), model validator +
-  doctor, offline-first docs (STATE A/B/C), clean-deployment verification, and
-  the §36 milestone report. Must preserve every M0–M22 feature/contract.
+- **M25 — Mobile-to-Edge USB Intake Bridge** (IN PROGRESS — M25 backend+frontend
+  complete; §39 final response given below; git commit/push still pending user
+  decision). Phone = camera, laptop = edge computer: a watcher polls a USB
+  intake folder, validates + sha256-de-duplicates files, and runs each new
+  package photo through the EXISTING M17 pipeline (pyzbar → PaddleOCR →
+  ExpiryParser → catalog) with NO new AI / cloud / images-in-PostgreSQL.
+  Human review + M17 confirm stay the only mutation path. Must preserve every
+  M0–M24 contract (M24 does not exist in this line; M23 is the base).
 
 ## Current State
 **M23 core DONE — backend 378 passed / frontend 119 passed, tooling live-tested:**

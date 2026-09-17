@@ -8,7 +8,7 @@ the decision pipeline is the product.
 
 ## Status
 
-**Milestones M0–M22 — COMPLETE.** Production-hardened, offline-first edge
+**Milestones M0–M25 — COMPLETE.** Production-hardened, offline-first edge
 platform.
 
 - **M0–M11 — Core platform:** FastAPI domain API over PostgreSQL (source of
@@ -23,18 +23,25 @@ platform.
   (in-memory Re-ID; no embeddings persisted).
 - **M20 — Store intelligence:** deterministic, evidence-backed insights that
   feed the single alert system.
-- **M21 — Demo & scenario engine:** 12 deterministic scenarios over the demo
+- **M21 — Demo & scenario engine:** 13 deterministic scenarios over the demo
   store, with a guided presentation view.
 - **M22 — Production hardening:** configuration validation, a strict
   config → PostgreSQL → migration-head startup sequence, `GET /api/system/status`
   readiness, a read-only integrity-check service + CLI, and a UI error boundary.
+- **M23 — Deployment packaging:** one-click provisioning/ops scripts, doctor +
+  model validator, offline-first docs.
+- **M25 — Mobile-to-Edge USB Intake Bridge:** watch a USB intake folder, run
+  every new package photo through the real M17 pipeline with deterministic
+  de-duplication, human-confirmed in the same screen. Phone = camera, laptop =
+  edge computer.
 
 ### Verification
 
-- **Backend:** 358 tests passing (PostgreSQL); `alembic check` clean
+- **Backend:** 413 tests passing (PostgreSQL); `alembic check` clean
   (`19c835a1a344`). See `docs/backend_test_database.md`.
-- **Frontend:** 119 tests passing; `tsc -b` and `vite build` clean.
+- **Frontend:** 121 tests passing; `tsc -b` and `vite build` clean.
 - **Docs:** `docs/milestone_22_final_report.md`,
+  `docs/milestone_25_mobile_usb_intake.md`, `docs/mobile_usb_intake.md`,
   `docs/final_architecture.md`, `docs/deployment.md`,
   `docs/privacy_architecture.md`, `docs/milestone_22_integration_audit.md`,
   `docs/final_demo_checklist.md`.
@@ -90,7 +97,8 @@ cp .env.example backend/.env
 - API health: <http://localhost:8000/api/health> · status: <http://localhost:8000/api/system/status>
 - Day-2 ops: `./scripts/storeye {status|doctor|demo-reset|backup|restore|migrate|restart|stop|logs|models}`
 - Guides: `docs/quickstart_demo.md` (showcase) · `docs/quickstart_edge.md` (offline edge install) ·
-  `docs/model_assets.md` · `docs/camera_setup.md` · `docs/backup_restore.md` · `docs/update_rollback.md` ·
+  `docs/mobile_usb_intake.md` (phone→USB intake) · `docs/model_assets.md` · `docs/camera_setup.md` ·
+  `docs/backup_restore.md` · `docs/update_rollback.md` ·
   `docs/troubleshooting.md` · `docs/deployment.md`
 
 ## Run Backend

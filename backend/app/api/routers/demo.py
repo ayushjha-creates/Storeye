@@ -135,6 +135,25 @@ def activate_scenario(
         raise HTTPException(status_code=503, detail=str(exc))
     except NotADemoStore as exc:
         raise HTTPException(status_code=403, detail=str(exc))
+
+    # M25: for the mobile-intake demo, queue the watermarked demo package into
+    # the real USB intake folder so the presenter can follow the photo -> scan
+    # -> review -> confirm journey live. Never runs under pytest; failures are
+    # recorded but do not fail activation.
+    if key == "MOBILE_USB_RECEIVING" and "pytest" not in __import__("sys").modules:
+        try:
+            from ...services.mobile_intake.manager import get_intake_manager
+
+            manager = get_intake_manager()
+            if manager.monitoring:
+                payload["mobile_intake_demo"] = manager.queue_demo_file()
+            else:
+                payload["mobile_intake_demo"] = {
+                    "queued": False,
+                    "note": "Intake watcher not running; use the demo 'Queue package' button.",
+                }
+        except Exception as exc:  # pragma: no cover - defensive
+            payload["mobile_intake_demo"] = {"queued": False, "error": str(exc)}
     return DemoActivationResult.from_engine(payload)
 
 

@@ -62,6 +62,22 @@ const routes = {
       updated_at: '2026-09-09T10:00:00Z',
     },
   },
+  '/api/mobile-intake/status': {
+    monitoring: true,
+    watcher_alive: true,
+    intake_dir: '/tmp/storeye/intake',
+    processing_dir: '/tmp/storeye/processing',
+    processed_dir: '/tmp/storeye/processed',
+    failed_dir: '/tmp/storeye/failed',
+    watched_at: '2026-09-17T08:00:00Z',
+    started_at: '2026-09-17T07:00:00Z',
+    scans: 2,
+    duplicates: 1,
+    rejected: 0,
+    active_jobs: 1,
+    failed_jobs: 0,
+  },
+  '/api/mobile-intake/jobs': { items: [], count: 0 },
 }
 
 beforeEach(() => {
@@ -186,5 +202,96 @@ describe('ReceiveSmartPage', () => {
 
     expect(await screen.findByText(/Unable to confidently read package information/i)).toBeInTheDocument()
     expect(screen.getByText(/Retake a flat, well-lit, close-up photo/i)).toBeInTheDocument()
+  })
+
+  it('loads a watcher-received USB job into the review form without re-scanning', async () => {
+    const JOB_ID = 'job-00000000-0000-4000-8000-000000000009'
+    stubFetchRoutes({
+      ...routes,
+      '/api/mobile-intake/jobs': {
+        count: 1,
+        items: [
+          {
+            job_id: JOB_ID,
+            filename: 'storeye-aashirvaad.jpg',
+            size: 178990,
+            state: 'REVIEW_REQUIRED',
+            demo: true,
+            duplicate_of: null,
+            error: null,
+            note: null,
+            acceptable: true,
+            reason: 'Barcode matched Aashirvaad Atta 5kg.',
+            candidate: {
+              barcode_read: true,
+              barcode: '8901063001015',
+              product_id: PRODUCT_ID,
+              product_name: 'Aashirvaad Atta 5kg',
+              product_sku: 'AAS-ATTA',
+              product_found: true,
+              batch_number: 'M25-DEMO-01',
+              manufacturing_date: '2026-08-01',
+              expiry_date: '2027-08-01',
+              expiry_date_precision: 'month',
+              mrp: '240.00',
+              confidence: 0.8,
+              labels_found: ['exp', 'mfg', 'batch', 'mrp'],
+              warnings: [],
+            },
+            created_at: '2026-09-17T08:01:00Z',
+            updated_at: '2026-09-17T08:01:05Z',
+          },
+        ],
+      },
+    })
+    render(
+      <MemoryRouter>
+        <ReceiveSmartPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Mobile Capture · USB intake')).toBeInTheDocument()
+    expect(await screen.findByText(/Listening in \/tmp\/storeye\/intake/i)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /review candidate/i }))
+
+    // The watcher's candidate prefills the same M17 review form.
+    expect(await screen.findByText(/Barcode matched Aashirvaad Atta 5kg/i)).toBeInTheDocument()
+    expect(productSelect()).toHaveValue(PRODUCT_ID)
+    expect(screen.getByLabelText('Batch number')).toHaveValue('M25-DEMO-01')
+    expect(screen.getByLabelText('Expiry date')).toHaveValue('2027-08-01')
+    // Quantity is never guessed — the human must enter it.
+    expect(screen.getByRole('button', { name: /confirm receipt/i })).toBeDisabled()
+    await userEvent.type(screen.getByLabelText(/Quantity to receive/), '20')
+    expect(screen.getByRole('button', { name: /confirm receipt/i })).toBeEnabled()
+  })
+
+  it('queues a demo package with the reset key and shows the confirmation note', async () => {
+    const fetchMock = stubFetchRoutes({
+      ...routes,
+      '/api/mobile-intake/demo-queue': {
+        queued: true,
+        filename: 'storeye-demo-8901063001015.jpg',
+        size: 178990,
+        sha256: 'ca8a227ba65b',
+        demo: true,
+        note: 'Queued for the intake watcher.',
+      },
+    })
+    render(
+      <MemoryRouter>
+        <ReceiveSmartPage />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: /queue demo package/i }))
+
+    expect(await screen.findByText(/queued — the watcher will decode it in a moment/i)).toBeInTheDocument()
+    const posts = fetchMock.mock.calls.filter(
+      (c) => String(c[0]).includes('/api/mobile-intake/demo-queue'),
+    )
+    expect(posts).toHaveLength(1)
+    const headers = posts[0][1]?.headers as Record<string, string>
+    expect(headers['X-Demo-Reset-Key']).toBe('storeye-demo-reset')
   })
 })

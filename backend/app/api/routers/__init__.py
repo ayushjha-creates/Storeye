@@ -15,6 +15,7 @@ from . import (
     demo,
     journeys,
     insights,
+    mobile_intake,
 )
 
 __all__ = [
@@ -37,4 +38,5 @@ __all__ = [
     "demo",
     "journeys",
     "insights",
+    "mobile_intake",
 ]

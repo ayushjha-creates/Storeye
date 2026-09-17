@@ -92,3 +92,13 @@ Live camera lifecycle (ONLINE → OFFLINE → recovery) with a real physical
 camera, USB capture rates on target hardware, and multi-camera Re-ID across
 simultaneous streams are documented but **NOT VERIFIED** in the M22/M23
 verification pass. Run a physical-camera soak test before fielding.
+
+## 7. Mobile phone capture (no camera needed)
+
+For **batch receiving** you do not need a connected camera at all: photograph a
+pack with your phone, copy the photo over USB into the intake folder
+(`backend/data/intake/`, override `STOREYE_INTAKE_DIR`), and the M25 watcher
+feeds it through the same close-up pipeline (barcode + PaddleOCR + ExpiryParser)
+with a human review gate. Capture rules are the same as for an in-browser
+photo: flat, well-lit, close-up, filling the frame. See
+`docs/mobile_usb_intake.md`.

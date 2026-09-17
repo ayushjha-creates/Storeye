@@ -1,3 +1,4 @@
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -31,6 +32,7 @@ from .api.routers import (
     demo,
     journeys,
     insights,
+    mobile_intake,
 )
 
 setup_logging()
@@ -50,10 +52,29 @@ def create_app() -> FastAPI:
         # Legacy SQLite/SQLModel diagnostics stack (health/ready/metrics only;
         # never a business fallback).
         init_db()
+        # M25: start the USB intake watcher (background thread). Skipped under
+        # pytest so tests drive ingestion deterministically via scan_now().
+        intake_manager = None
+        if "pytest" not in sys.modules:
+            try:
+                from .services.mobile_intake.manager import get_intake_manager
+
+                intake_manager = get_intake_manager()
+                intake_manager.start()
+                logger.info(
+                    "Mobile intake watcher started at %s", intake_manager.watcher.intake_dir
+                )
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("Failed to start mobile intake watcher")
         logger.info("Application initialized")
         try:
             yield
         finally:
+            if intake_manager is not None:
+                try:
+                    intake_manager.stop(timeout=5.0)
+                except Exception:  # pragma: no cover - defensive
+                    logger.exception("Error stopping mobile intake watcher")
             # Shut down the Edge runtime (camera workers) cleanly.
             try:
                 from .edge import get_runtime
@@ -112,6 +133,7 @@ def create_app() -> FastAPI:
     app.include_router(journeys.router, prefix="/api")
     app.include_router(demo.router, prefix="/api")
     app.include_router(insights.router, prefix="/api")
+    app.include_router(mobile_intake.router, prefix="/api")
     app.include_router(edge_router, prefix="/api")
 
     return app

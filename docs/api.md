@@ -135,9 +135,43 @@ env; default `storeye-demo-reset` used **only** in development; wrong/missing �
 
 All operations resolve the demo store by its stable id and refuse unless
 `Store.is_demo is True` (service-layer guard), so real store data can never be
-modified by demo tooling. The 12 keys are: `NORMAL_STORE, LOW_STOCK, OUT_OF_STOCK,
+modified by demo tooling. The 13 keys are: `NORMAL_STORE, LOW_STOCK, OUT_OF_STOCK,
 EXPIRY_RISK, LOW_SHELF_BACKSTOCK, MISPLACEMENT, HIGH_TRAFFIC, HIGH_DWELL,
-MULTI_CAMERA_JOURNEY, CAMERA_OFFLINE, SMART_RECEIVING, COMBINED_CRISIS`.
+MULTI_CAMERA_JOURNEY, CAMERA_OFFLINE, SMART_RECEIVING, MOBILE_USB_RECEIVING,
+COMBINED_CRISIS`.
+
+### Mobile-to-Edge USB Intake Bridge (M25; read-mostly, `POST` guarded)
+
+Background watcher on the edge node polls `backend/data/intake/` (override
+`STOREYE_INTAKE_DIR`), validates+sizes a file, hashes it for idempotency, then
+runs the existing M17 `scan_package` **read-only** pipeline. **Nothing is
+committed here** — human confirmation stays `POST /api/batch-intake/confirm`.
+
+- `GET  /api/mobile-intake/status` — monitoring flag, `watcher_alive`, intake/
+  processing/processed/failed dirs, `watched_at`, counters (`scans`,
+  `duplicates`, `rejected`, `active_jobs`, `failed_jobs`). 404 when the bridge
+  is disabled.
+- `GET  /api/mobile-intake/jobs` — newest-first job list (states:
+  `DETECTED, WAITING_FOR_COPY, PROCESSING, SCANNING, OCR_PROCESSING,
+  REVIEW_REQUIRED, CONFIRMED, PROCESSED, FAILED`), candidates rehydrated to the
+  `BatchScanCandidateRead` shape.
+- `GET  /api/mobile-intake/jobs/{job_id}` — single job (404 unknown).
+- `POST /api/mobile-intake/jobs/{job_id}/close` — human closes a review →
+  `PROCESSED` (404 unknown, 409 wrong state).
+- `POST /api/mobile-intake/jobs/{job_id}/rescan` — retry a `FAILED` job from its
+  stored copy (409 unless `FAILED`).
+- `POST /api/mobile-intake/demo-queue` — [demo mode only, header
+  `X-Demo-Reset-Key`] places a watermarked demo package (`storeye-demo-*.jpg`)
+  through the same watcher path; 403 in production/non-demo. Optional JSON body
+  `{"product": "<slug>"}` selects the seeded catalogue pack — `aashirvaad`
+  (default, Aashirvaad Atta 5kg / `8901063001015`, BATCH `M25-DEMO-01`) or
+  `amul` (Amul Milk 1L / `8901262030003`, BATCH `M25-DEMO-02`); unknown slugs
+  fall back to `aashirvaad`.
+
+Rules: only `.jpg/.jpeg/.png/.webp`; ≤ `INTAKE_MAX_MB` (15); stability wait
+`INTAKE_STABILITY_SECONDS` (2 s); identical content hash → duplicate
+(`duplicate_of`, never a second review; duplicate-of-failed → `FAILED`); active
+reviews are never retention-pruned. No images persist in PostgreSQL.
 
 ## Error example (duplicate SKU)
 ```

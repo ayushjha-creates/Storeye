@@ -379,6 +379,21 @@ def apply_smart_receiving(session: Session, store: Store, now: datetime) -> dict
     return {"workflow": "M17 receive", "note": "Run the real close-up scan workflow."}
 
 
+def apply_mobile_usb_receiving(session: Session, store: Store, now: datetime) -> dict:
+    """MOBILE_USB_RECEIVING — baseline restored for the real USB-intake run.
+
+    The overlay itself only neutralises derived intelligence (same as
+    SMART_RECEIVING). The demo package is dropped into the intake folder by
+    the API layer (NOT here — the engine must stay DB-only and deterministic,
+    and never pretend OCR happened).
+    """
+    _neutralize(session, store, now)
+    return {
+        "workflow": "M25 mobile intake",
+        "note": "Queued watermarked demo package for the real intake pipeline.",
+    }
+
+
 def apply_combined_crisis(session: Session, store: Store, now: datetime) -> dict:
     # Keep the rich M18/M20 baseline exactly as seeded (multiple simultaneous
     # problems). The engine re-evaluates so derived rows are fresh.
@@ -397,5 +412,6 @@ APPLIERS = {
     data.SCENARIO_MULTI_CAMERA_JOURNEY: apply_multi_camera_journey,
     data.SCENARIO_CAMERA_OFFLINE: apply_camera_offline,
     data.SCENARIO_SMART_RECEIVING: apply_smart_receiving,
+    data.SCENARIO_MOBILE_USB_RECEIVING: apply_mobile_usb_receiving,
     data.SCENARIO_COMBINED_CRISIS: apply_combined_crisis,
 }

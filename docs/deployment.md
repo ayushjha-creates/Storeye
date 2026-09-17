@@ -30,7 +30,8 @@ Every day-2 operation has a dedicated script — see the `scripts/` table in
 [`quickstart_edge.md`](quickstart_edge.md) and readiness/diagnostics docs:
 [`quickstart_demo.md`](quickstart_demo.md) · [`quickstart_edge.md`](quickstart_edge.md) ·
 [`model_assets.md`](model_assets.md) · [`camera_setup.md`](camera_setup.md) ·
-[`backup_restore.md`](backup_restore.md) · [`update_rollback.md`](update_rollback.md).
+[`backup_restore.md`](backup_restore.md) · [`update_rollback.md`](update_rollback.md) ·
+[`troubleshooting.md`](troubleshooting.md).
 
 ---
 

@@ -91,7 +91,7 @@ cp .env.example backend/.env
 - Day-2 ops: `./scripts/storeye {status|doctor|demo-reset|backup|restore|migrate|restart|stop|logs|models}`
 - Guides: `docs/quickstart_demo.md` (showcase) · `docs/quickstart_edge.md` (offline edge install) ·
   `docs/model_assets.md` · `docs/camera_setup.md` · `docs/backup_restore.md` · `docs/update_rollback.md` ·
-  `docs/deployment.md`
+  `docs/troubleshooting.md` · `docs/deployment.md`
 
 ## Run Backend
 

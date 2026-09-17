@@ -123,5 +123,5 @@ curl http://localhost:8000/api/system/status # status OK, migration_current true
 ./scripts/storeye test                       # full backend + frontend suite
 ```
 
-See `docs/deployment.md` (extended reference) and `docs/troubleshooting` in
-`docs/milestone_23_deployment_packaging.md`.
+See `docs/troubleshooting.md` (consolidated), `docs/deployment.md` (extended
+reference), and `docs/milestone_23_deployment_packaging.md` §9.

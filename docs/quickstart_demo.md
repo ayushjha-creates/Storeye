@@ -88,3 +88,5 @@ Baseline demo data: **22 insights / 8 alerts / 5 insight-generated alerts /
 | no camera insights | cameras are demo/synthetic by default; activate a scenario; real sources = `docs/camera_setup.md` |
 | `libzbar` errors | `brew install zbar` (macOS) / `apt-get install libzbar0` (Debian) |
 | port 8000/5173 busy | `./scripts/storeye stop --clean-orphans` then restart |
+
+Full symptom→fix reference: `docs/troubleshooting.md`.

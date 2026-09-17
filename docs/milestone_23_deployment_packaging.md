@@ -202,7 +202,7 @@ invariant (`docs/privacy_architecture.md`).
 | One-click lifecycle scripts | `scripts/` (`lib/common.sh` + `setup|migrate|seed|demo-reset|start|stop|status|doctor|backup|restore|start-backend|start-frontend|storeye`) |
 | Determinism proof CLI | `backend/scripts/demo_verify.py` |
 | Env templates | `.env.example`, `frontend/.env.example` |
-| Docs | `docs/model_assets.md`, `camera_setup.md`, `quickstart_demo.md`, `quickstart_edge.md`, `backup_restore.md`, `update_rollback.md`, `deployment.md`, `README.md` |
+| Docs | `docs/model_assets.md`, `camera_setup.md`, `quickstart_demo.md`, `quickstart_edge.md`, `backup_restore.md`, `update_rollback.md`, `troubleshooting.md`, `deployment.md`, `README.md` |
 | Tests | `test_deployment_utils.py` (19), `test_demo_reset_is_deterministic_and_isolated` |
 | `.gitignore` | now covers `/logs/` and `/backups/` |
 

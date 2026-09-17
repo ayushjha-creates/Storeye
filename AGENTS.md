@@ -38,6 +38,7 @@
   integrity_check on dev DB → OK, 0 errors/warnings.
 - Docs: new `docs/model_assets.md`, `camera_setup.md`, `quickstart_demo.md`,
   `quickstart_edge.md`, `backup_restore.md`, `update_rollback.md`,
+  `troubleshooting.md`,
   `docs/milestone_23_deployment_packaging.md` (§36 report: summary, architecture,
   provisioning, network topology, install, configuration, verification logs,
   logs, troubleshooting, rollback, outputs, test matrix, NOT VERIFIED);

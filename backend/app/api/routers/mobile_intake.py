@@ -15,10 +15,14 @@ There is deliberately NO automatic inventory-mutation endpoint here.
 
 from __future__ import annotations
 
+import mimetypes
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi.responses import FileResponse
 
+from ..deps import require_role
+from ...models import User
 from ...schemas.mobile_intake import (
     MobileIntakeJobListRead,
     MobileIntakeJobRead,
@@ -41,26 +45,50 @@ def _job_response(data: dict) -> MobileIntakeJobRead:
 
 
 @router.get("/status", response_model=MobileIntakeStatusRead)
-def intake_status() -> MobileIntakeStatusRead:
+def intake_status(
+    current_user: User = Depends(require_role("STAFF")),
+) -> MobileIntakeStatusRead:
     return MobileIntakeStatusRead(**_manager().status())
 
 
 @router.get("/jobs", response_model=MobileIntakeJobListRead)
-def list_jobs() -> MobileIntakeJobListRead:
+def list_jobs(
+    current_user: User = Depends(require_role("STAFF")),
+) -> MobileIntakeJobListRead:
     items = [_job_response(d) for d in _manager().list_jobs()]
     return MobileIntakeJobListRead(items=items, count=len(items))
 
 
 @router.get("/jobs/{job_id}", response_model=MobileIntakeJobRead)
-def get_job(job_id: str) -> MobileIntakeJobRead:
+def get_job(
+    job_id: str,
+    current_user: User = Depends(require_role("STAFF")),
+) -> MobileIntakeJobRead:
     try:
         return _job_response(_manager().get_job(job_id))
     except MobileIntakeError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
+@router.get("/jobs/{job_id}/photo")
+def get_job_photo(
+    job_id: str,
+    current_user: User = Depends(require_role("STAFF")),
+):
+    """Stream the original on-disk photo for human review (never stored in PG)."""
+    try:
+        path = _manager().photo_path(job_id)
+    except MobileIntakeError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
 @router.post("/jobs/{job_id}/close", response_model=MobileIntakeJobRead)
-def close_job(job_id: str) -> MobileIntakeJobRead:
+def close_job(
+    job_id: str,
+    current_user: User = Depends(require_role("STAFF")),
+) -> MobileIntakeJobRead:
     """Mark a reviewed job PROCESSED (after the M17 confirm wrote the data)."""
     try:
         return _job_response(_manager().close_job(job_id))
@@ -69,7 +97,10 @@ def close_job(job_id: str) -> MobileIntakeJobRead:
 
 
 @router.post("/jobs/{job_id}/rescan", response_model=MobileIntakeJobRead)
-def rescan_job(job_id: str) -> MobileIntakeJobRead:
+def rescan_job(
+    job_id: str,
+    current_user: User = Depends(require_role("STAFF")),
+) -> MobileIntakeJobRead:
     """Re-run the read-only scan pipeline over a FAILED/REVIEW photo."""
     try:
         return _job_response(_manager().rescan(job_id))

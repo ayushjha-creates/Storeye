@@ -6,7 +6,7 @@ identity: no names, no face images, no biometrics, no embeddings, no crops.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, List, Optional
 from uuid import UUID
 
@@ -104,3 +104,12 @@ class JourneySummaryRead(BaseModel):
     avg_zone_dwell_seconds: Optional[float]
     total_zone_visits: int
     most_visited_zone: Optional[MostVisitedZoneRead]
+
+
+class DailyFootfallRead(BaseModel):
+    date: date
+    visitors: int
+
+
+class DailyFootfallListRead(BaseModel):
+    items: List[DailyFootfallRead]

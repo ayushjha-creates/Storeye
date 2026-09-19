@@ -17,6 +17,7 @@ const routes = {
     ],
     total: 1,
   },
+  '/api/inventory/batches': { items: [], total: 0 },
   '/api/inventory/stores/aaaabbbb-0000-4000-8000-000000000001/products/aaaabbbb-0000-4000-8000-000000000002/batches': {
     items: [], total: 0,
   },
@@ -67,7 +68,7 @@ describe('InventoryPage', () => {
     )
 
     await userEvent.click(await screen.findByRole('button', { name: /details/i }))
-    await userEvent.click(screen.getByRole('button', { name: /\+ receive stock/i }))
+    await userEvent.click(screen.getByRole('button', { name: '+ Receive stock' }))
 
     const dialog = screen.getByRole('dialog', { name: /receive stock/i })
     const quantity = within(dialog).getByLabelText('Quantity to receive')

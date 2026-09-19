@@ -1,15 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Card } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { Button, Modal } from '../components/ui/Modal'
 import { ErrorMessage, EmptyState } from '../components/ui/ErrorState'
 import { Spinner } from '../components/ui/Spinner'
 import { billApi } from '../lib/api/bills'
+import { smsApi } from '../lib/api/sms'
 import { productApi } from '../lib/api/products'
 import { customerApi } from '../lib/api/customers'
 import { storeApi } from '../lib/api/zone'
 import { cleanName } from '../lib/cleanNames'
-import type { Bill, Customer, Product } from '../lib/api/types'
+import type { Bill, Customer, Product, SmsMessage, SmsStatusRead } from '../lib/api/types'
 
 interface LineItem {
   product: Product
@@ -17,6 +19,12 @@ interface LineItem {
   unit_price: number
   tax: number
   line_total: number
+}
+
+function isSameDay(iso: string): boolean {
+  const d = new Date(iso)
+  const now = new Date()
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
 }
 
 const inputCls =
@@ -36,6 +44,30 @@ export function BillingPage() {
   const [billNumber, setBillNumber] = useState('')
   const [customerId, setCustomerId] = useState('')
   const [lines, setLines] = useState<LineItem[]>([])
+
+  // M31: receipt-SMS delivery state (best-effort — never blocks billing UI).
+  const [smsStatus, setSmsStatus] = useState<SmsStatusRead | null>(null)
+  const [smsMessages, setSmsMessages] = useState<SmsMessage[]>([])
+  const [smsBusy, setSmsBusy] = useState<string | null>(null)
+
+  const loadSms = useCallback(async (sid: string | null) => {
+    try {
+      if (!sid) {
+        setSmsStatus(null)
+        setSmsMessages([])
+        return
+      }
+      const [status, list] = await Promise.all([
+        smsApi.status({ store_id: sid }),
+        smsApi.list({ store_id: sid, limit: 200 }),
+      ])
+      setSmsStatus(status)
+      setSmsMessages(list.items)
+    } catch {
+      setSmsStatus(null)
+      setSmsMessages([])
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -57,12 +89,13 @@ export function BillingPage() {
       setBills(billsRes.items)
       setProducts(prodRes.items)
       setCustomers(custRes.items)
+      await loadSms(sid)
     } catch (err) {
       setError(err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadSms])
 
   useEffect(() => {
     load()
@@ -142,29 +175,87 @@ export function BillingPage() {
   const customerName = (cid: string | null) =>
     customers.find((c) => c.id === cid)?.name ?? (cid ? (customers.find((c) => c.id === cid)?.mobile ?? cid.slice(0, 8)) : 'Walk-in')
 
+  const latestSmsForBill = (billId: string): SmsMessage | null =>
+    smsMessages
+      .filter((m) => m.bill_id === billId)
+      .reduce<SmsMessage | null>(
+        (best, m) => (best === null || new Date(m.created_at) > new Date(best.created_at) ? m : best),
+        null,
+      )
+
+  const resendSms = async (message: SmsMessage) => {
+    setSmsBusy(message.id)
+    try {
+      await smsApi.resend(message.id)
+      await loadSms(storeId)
+    } catch (err) {
+      setError(err)
+    } finally {
+      setSmsBusy(null)
+    }
+  }
+
+  const todaySales = bills.filter((b) => isSameDay(b.created_at))
+  const todayTotal = todaySales.reduce((sum, b) => sum + Number(b.total), 0)
+  const averageBill = bills.length > 0 ? todayTotal / (todaySales.length || 1) : 0
+
   return (
     <div className="page-shell space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-bold">Billing</h1>
+          <h1 className="font-bold">Sales</h1>
           <p className="mt-0.5 text-sm text-black">
-            Manual billing only — the shopkeeper creates each bill. There is no
-            AI-generated billing, and a bill never auto-changes inventory.
+            Your bills for today and what the shop sold.{' '}
+            <Link to="/app/customers" className="text-brand-600 underline decoration-brand-200 hover:text-brand-700">
+              View customers →
+            </Link>
           </p>
         </div>
         <Button onClick={() => { setCreateOpen(true); if (lines.length === 0 && products.length > 0) addLine() }} disabled={!storeId}>
-          + New bill
+          + New Sale
         </Button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="card p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Today's Sales</p>
+          <p className="mt-1 text-xl font-bold tabular text-brand-700">₹{todayTotal.toFixed(2)}</p>
+        </div>
+        <div className="card p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Bills Today</p>
+          <p className="mt-1 text-xl font-bold tabular text-gray-900">{todaySales.length}</p>
+        </div>
+        <div className="card p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Average Bill</p>
+          <p className="mt-1 text-xl font-bold tabular text-gray-900">₹{averageBill.toFixed(2)}</p>
+        </div>
       </div>
 
       {error ? <ErrorMessage error={error} onRetry={load} /> : null}
 
+      {smsStatus?.enabled ? (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+          {smsStatus.configured ? (
+            <span>
+              Receipt SMS is on — receipts are sent to the customer's phone (sent{' '}
+              {smsStatus.counts.sent}, queued {smsStatus.counts.queued}, failed{' '}
+              {smsStatus.counts.failed}).
+            </span>
+          ) : (
+            <span>
+              Receipt SMS is on but <span className="font-medium">not configured</span> — set
+              MSG91_AUTH_KEY in the backend .env, or receipts stay queued.
+            </span>
+          )}
+        </div>
+      ) : null}
+
       {loading ? (
-        <Spinner label="Loading billing…" />
+        <Spinner label="Loading sales…" />
       ) : (
-        <Card title="Bills" subtitle={`${bills.length} bill(s)`}>
+        <Card title="Recent bills" subtitle={`${bills.length} bill(s) recorded`}>
           {bills.length === 0 ? (
-            <EmptyState title="No bills yet" hint="Create a manual bill to start recording transactions." />
+            <EmptyState title="No sales yet" hint="Select + New Sale to record your first bill." />
           ) : (
             <div className="overflow-x-auto">
               <table className="table-base min-w-[760px] w-full text-left">
@@ -177,6 +268,7 @@ export function BillingPage() {
                     <th>Tax</th>
                     <th>Total</th>
                     <th>Status</th>
+                    <th>Receipt SMS</th>
                     <th>Created</th>
                   </tr>
                 </thead>
@@ -193,6 +285,31 @@ export function BillingPage() {
                         <Badge tone={b.delivery_status === 'DELIVERED' ? 'green' : b.delivery_status === 'DRAFT' ? 'gray' : 'blue'}>
                           {b.delivery_status}
                         </Badge>
+                      </td>
+                      <td className="whitespace-nowrap">
+                        {b.customer_id === null ? <span className="text-gray-300">—</span> : (() => {
+                          const sms = latestSmsForBill(b.id)
+                          if (!sms) return <span className="text-gray-400">No receipt</span>
+                          const tone =
+                            sms.status === 'SENT' ? 'green' : sms.status === 'QUEUED' ? 'blue' : sms.status === 'SENDING' ? 'amber' : 'red'
+                          return (
+                            <div className="flex items-center gap-2">
+                              <Badge tone={tone}>
+                                {sms.status === 'QUEUED' ? 'Queued' : sms.status === 'SENDING' ? 'Sending' : sms.status === 'SENT' ? 'Sent' : 'Failed'}
+                              </Badge>
+                              {sms.status === 'FAILED' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => resendSms(sms)}
+                                  disabled={smsBusy === sms.id}
+                                  className="text-xs font-medium text-brand-700 hover:underline disabled:opacity-50"
+                                >
+                                  {smsBusy === sms.id ? '…' : 'Resend'}
+                                </button>
+                              ) : null}
+                            </div>
+                          )
+                        })()}
                       </td>
                       <td className="whitespace-nowrap text-gray-400">
                         {new Date(b.created_at).toLocaleString()}

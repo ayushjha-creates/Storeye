@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { ReceiveSmartPage } from './ReceiveSmart'
@@ -112,7 +112,7 @@ describe('ReceiveSmartPage', () => {
       </MemoryRouter>,
     )
 
-    await screen.findByText('Smart Batch Receiving')
+    await screen.findByText('Receive Stock')
 
     const input = screen.getByTestId('package-file-input') as HTMLInputElement
     await userEvent.upload(input, packImage())
@@ -250,7 +250,7 @@ describe('ReceiveSmartPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText('Mobile Capture · USB intake')).toBeInTheDocument()
+    expect(await screen.findByText('Scan with your phone')).toBeInTheDocument()
     expect(await screen.findByText(/Listening in \/tmp\/storeye\/intake/i)).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /review candidate/i }))
@@ -264,6 +264,108 @@ describe('ReceiveSmartPage', () => {
     expect(screen.getByRole('button', { name: /confirm receipt/i })).toBeDisabled()
     await userEvent.type(screen.getByLabelText(/Quantity to receive/), '20')
     expect(screen.getByRole('button', { name: /confirm receipt/i })).toBeEnabled()
+  })
+
+  it('offers rescan for a FAILED USB job and posts to the rescan endpoint', async () => {
+    const fetchMock = stubFetchRoutes({
+      ...routes,
+      '/api/mobile-intake/jobs': {
+        count: 1,
+        items: [
+          {
+            job_id: 'job-failed',
+            filename: 'blurry-biscuit.jpg',
+            size: 1024,
+            state: 'FAILED',
+            demo: false,
+            duplicate_of: null,
+            error: '[SCAN_FAILED] no candidate',
+            note: null,
+            acceptable: null,
+            reason: null,
+            candidate: null,
+            photo_url: null,
+            created_at: '2026-09-17T08:01:00Z',
+            updated_at: '2026-09-17T08:01:05Z',
+          },
+        ],
+      },
+    })
+    render(
+      <MemoryRouter>
+        <ReceiveSmartPage />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: /rescan blurry-biscuit\.jpg/i }),
+    )
+    await waitFor(() => {
+      const rescanPosts = fetchMock.mock.calls.filter((c) =>
+        String(c[0]).includes('/api/mobile-intake/jobs/job-failed/rescan'),
+      )
+      expect(rescanPosts.length).toBeGreaterThan(0)
+    })
+  })
+
+  it('closes the USB job after a confirmed receipt', async () => {
+    const fetchMock = stubFetchRoutes({
+      ...routes,
+      '/api/mobile-intake/jobs': {
+        count: 1,
+        items: [
+          {
+            job_id: 'job-open',
+            filename: 'usb-photo.jpg',
+            size: 2048,
+            state: 'REVIEW_REQUIRED',
+            demo: false,
+            duplicate_of: null,
+            error: null,
+            note: null,
+            acceptable: true,
+            reason: 'Barcode matched Amul Milk 1L.',
+            candidate: {
+              barcode_read: true,
+              barcode: '8901234567890',
+              product_id: PRODUCT_ID,
+              product_name: 'Amul Milk 1L',
+              product_sku: 'AMUL-1L',
+              product_found: true,
+              batch_number: 'M24031',
+              manufacturing_date: '2026-03-12',
+              expiry_date: '2026-12-15',
+              expiry_date_precision: 'day',
+              mrp: '14.00',
+              confidence: 0.92,
+              labels_found: ['exp', 'mfg', 'batch', 'mrp'],
+              warnings: [],
+            },
+            photo_url: null,
+            created_at: '2026-09-17T08:01:00Z',
+            updated_at: '2026-09-17T08:01:05Z',
+          },
+        ],
+      },
+    })
+    render(
+      <MemoryRouter>
+        <ReceiveSmartPage />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: /review candidate/i }))
+    await screen.findByText(/Barcode matched Amul Milk 1L/i)
+    await userEvent.type(screen.getByLabelText(/Quantity to receive/), '3')
+    await userEvent.click(screen.getByRole('button', { name: /confirm receipt/i }))
+
+    expect(await screen.findByText('Stock received')).toBeInTheDocument()
+    await waitFor(() => {
+      const closePosts = fetchMock.mock.calls.filter((c) =>
+        String(c[0]).includes('/api/mobile-intake/jobs/job-open/close'),
+      )
+      expect(closePosts.length).toBeGreaterThan(0)
+    })
   })
 
   it('queues a demo package with the reset key and shows the confirmation note', async () => {

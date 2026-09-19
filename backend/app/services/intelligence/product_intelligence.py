@@ -44,6 +44,13 @@ COMP_SURPLUS = "POSSIBLE_SURPLUS"
 COMP_NO_INVENTORY = "NO_INVENTORY"
 COMP_NOT_ASSESSED = "NOT_ASSESSED"
 
+# Honest wording for the PRODUCT_CANDIDATE/Unknown-product path. The model DID
+# see this class; we simply do not know which catalog product it is.
+UNKNOWN_PRODUCT_MESSAGE = (
+    "Unknown product — the model detected this class but it is not mapped to a "
+    "catalog product. Map it via Product.ai_classes; nothing is guessed."
+)
+
 
 @dataclass
 class ProductIntelligenceRow:
@@ -160,11 +167,37 @@ class ProductIntelligenceService:
                         row.comparison_status = COMP_SURPLUS
             else:
                 row.comparison_status = COMP_NOT_ASSESSED
-                row.message = "Unmapped AI class — assign Product.ai_classes to tie it to a product."
+                row.message = UNKNOWN_PRODUCT_MESSAGE
             rows.append(row)
 
         rows.sort(key=lambda r: (-r.visible_count, r.ai_class.lower()))
         return rows
+
+    def candidates(
+        self,
+        *,
+        store_id: UUID,
+        camera_id: Optional[UUID] = None,
+        min_confidence: float = 0.5,
+        hours: int = 24,
+    ) -> List[ProductIntelligenceRow]:
+        """PRODUCT_CANDIDATE path: unmapped AI classes only.
+
+        These are real detections the model made that are NOT tied to any
+        catalog product. They are surfaced for an operator to map (via
+        `Product.ai_classes`) — never guessed into a product, never counted as
+        inventory. Deterministic order (visible_count desc, class asc).
+        """
+        return [
+            row
+            for row in self.products(
+                store_id=store_id,
+                camera_id=camera_id,
+                min_confidence=min_confidence,
+                hours=hours,
+            )
+            if not row.mapped
+        ]
 
     # ------------------------------------------------------------------
     # Internals

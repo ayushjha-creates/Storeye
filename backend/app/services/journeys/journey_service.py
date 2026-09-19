@@ -293,6 +293,57 @@ class JourneyService:
             self.session.commit()
         return len(rows)
 
+    def purge_analytics(
+        self,
+        *,
+        store_id: UUID,
+        retention_days: int = 30,
+        now: Optional[datetime] = None,
+    ) -> dict:
+        """M29 retention: delete only the MINIMAL durable analytics for visits
+        that ended before the cutoff.
+
+        Deletes (oldest first) PersonTrackAssociation -> PersonCameraTransition
+        -> ZoneVisit -> GlobalPersonSession for this store. It NEVER touches
+        observations, products, inventory, batches, bills, sales, cameras,
+        zones or any other business table. Sessions are deleted by their
+        `last_seen_at`; a session still active right now is never removed.
+        """
+        if retention_days < 1:
+            raise ValueError("retention_days must be >= 1")
+        cutoff = self._as_utc(now or datetime.now(timezone.utc)) - timedelta(
+            days=int(retention_days)
+        )
+        counts = {"track_associations": 0, "transitions": 0, "zone_visits": 0, "sessions": 0}
+
+        staged = self.session.scalars(
+            select(GlobalPersonSession.id).where(
+                GlobalPersonSession.store_id == store_id,
+                GlobalPersonSession.last_seen_at < cutoff,
+            )
+        ).all()
+        if not staged:
+            return counts
+        session_ids = list(staged)
+
+        for cls, col, key in (
+            (PersonTrackAssociation, PersonTrackAssociation.session_id, "track_associations"),
+            (PersonCameraTransition, PersonCameraTransition.session_id, "transitions"),
+            (ZoneVisit, ZoneVisit.session_id, "zone_visits"),
+        ):
+            counts[key] = self.session.execute(
+                cls.__table__.delete().where(col.in_(session_ids))
+            ).rowcount or 0
+
+        counts["sessions"] = self.session.execute(
+            GlobalPersonSession.__table__.delete().where(
+                GlobalPersonSession.id.in_(session_ids)
+            )
+        ).rowcount or 0
+
+        self.session.commit()
+        return counts
+
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
@@ -493,6 +544,40 @@ class JourneyService:
             "total_zone_visits": total_zone_visits,
             "most_visited_zone": most_visited_zone,
         }
+
+    def daily_visitors(self, store_id: UUID, days: int = 7) -> List[dict]:
+        """Per-day unique-footfall series (UTC) for the trailing `days` days.
+
+        One row per global person session counted on the day it was first
+        seen, filling every day back to `today - (days - 1)` with 0s when no
+        sessions started that day. Read-only. Ordered oldest → newest.
+        """
+        today = datetime.now(timezone.utc).date()
+        start_dt = datetime.combine(
+            today - timedelta(days=days - 1), datetime.min.time(), tzinfo=timezone.utc
+        )
+        rows = self.session.execute(
+            select(GlobalPersonSession.first_seen_at)
+            .where(
+                GlobalPersonSession.store_id == store_id,
+                GlobalPersonSession.first_seen_at >= start_dt,
+            )
+            .order_by(GlobalPersonSession.first_seen_at)
+        ).scalars().all()
+
+        per_day: Dict = {}
+        for ts in rows:
+            if ts.tzinfo is not None:
+                day = ts.astimezone(timezone.utc).date()
+            else:
+                day = ts.date()
+            per_day[day] = per_day.get(day, 0) + 1
+
+        return [
+            {"date": day, "visitors": per_day.get(day, 0)}
+            for i in range(days)
+            for day in [today - timedelta(days=days - 1 - i)]
+        ]
 
     def zone_analytics(
         self,

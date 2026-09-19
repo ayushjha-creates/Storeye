@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { api, ApiError, NetworkError, setAuthToken } from './client'
+import { api, ApiError, NetworkError } from './client'
 import { stubFetchRoutes } from '../../test/mock'
 
 describe('api client', () => {
@@ -62,13 +62,24 @@ describe('api client', () => {
     await expect(api.get('/api/health')).rejects.toBeInstanceOf(NetworkError)
   })
 
-  it('sends the Authorization header when an auth token is set', async () => {
+  it('sends cookies with credentials: include (session auth, no token)', async () => {
     const fetchMock = stubFetchRoutes({ '/api/health': { status: 'ok' } })
-    setAuthToken('test-token-123')
     await api.get('/api/health')
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
-    expect((init.headers as Record<string, string>).Authorization).toContain('Bearer test-token-123')
-    setAuthToken(null)
+    expect(init.credentials).toBe('include')
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
+  })
+
+  it('adds the CSRF header on mutating requests only', async () => {
+    const fetchMock = stubFetchRoutes({ '/api/auth/login': { user: {}, expires_in_seconds: 1 } })
+    await api.post('/api/auth/login', { email: 'a@b.c', password: 'x' })
+    const [, postInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect((postInit.headers as Record<string, string>)['X-Storeye-CSRF']).toBe('1')
+
+    const getMock = stubFetchRoutes({ '/api/health': { status: 'ok' } })
+    await api.get('/api/health')
+    const [, getInit] = getMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect((getInit.headers as Record<string, string>)['X-Storeye-CSRF']).toBeUndefined()
   })
 
   it('adds query params correctly and skips empty values', async () => {

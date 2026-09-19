@@ -51,13 +51,8 @@ if [ "$FRONTEND_ONLY" = "0" ]; then
     # A stale `storeye start`/CTRL-C can leave an untracked uvicorn behind.
     clean_port_orphans "$STOREYE_PORT" "uvicorn"
     log "Starting backend on ${STOREYE_HOST}:${STOREYE_PORT}"
-    (
-      cd "$BACKEND_DIR"
-      DATABASE_URL="$DATABASE_URL" nohup "$VENV_DIR/bin/uvicorn" app.main:app \
-        --host "$STOREYE_HOST" --port "$STOREYE_PORT" \
-        >> "$LOGS_BACKEND/storeye-backend.log" 2>&1 &
-      echo $! > "$(pid_file backend)"
-    )
+    spawn_detached "$(pid_file backend)" "$BACKEND_DIR" "$LOGS_BACKEND/storeye-backend.log" \
+      "$VENV_DIR/bin/uvicorn" app.main:app --host "$STOREYE_HOST" --port "$STOREYE_PORT"
     NEW_PID="$(read_pid backend)"
     if wait_for_http "$(BACKEND_URL)/api/health" 60; then
       LISTENER="$(port_pid "$STOREYE_PORT")"
@@ -81,13 +76,10 @@ if [ "$BACKEND_ONLY" = "0" ]; then
   elif [ ! -x "$VITE_BIN" ]; then
     warn "Vite not installed ($VITE_BIN). Run ./scripts/setup.sh (needs Node)."
   else
+    clean_port_orphans "$STOREYE_FRONTEND_PORT" "vite"
     log "Starting frontend on ${STOREYE_FRONTEND_HOST}:${STOREYE_FRONTEND_PORT}"
-    (
-      cd "$FRONTEND_DIR"
-      nohup "$VITE_BIN" --host "$STOREYE_FRONTEND_HOST" --port "$STOREYE_FRONTEND_PORT" \
-        >> "$LOGS_FRONTEND/storeye-frontend.log" 2>&1 &
-      echo $! > "$(pid_file frontend)"
-    )
+    CI=true spawn_detached "$(pid_file frontend)" "$FRONTEND_DIR" "$LOGS_FRONTEND/storeye-frontend.log" \
+      "$VITE_BIN" --host "$STOREYE_FRONTEND_HOST" --port "$STOREYE_FRONTEND_PORT" --strictPort
     if wait_for_http "$(FRONTEND_URL)" 60; then
       ok "Frontend ready at $(FRONTEND_URL) (pid $(read_pid frontend))"
     else

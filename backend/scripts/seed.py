@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.db.base import Base
 from app.db.session import create_db_engine
+from app.core.auth import hash_password
 from sqlalchemy.orm import Session
 from app.models import (
     Batch,
@@ -35,10 +36,16 @@ from app.models import (
     SaleItem,
     Shelf,
     Store,
+    User,
     Zone,
 )
 
 DEMO_STORE_NAME = "Storeye Demo Kirana"
+
+# Bootstrap login for a freshly seeded (non-demo) dev database. Owners
+# provision further users through POST /api/users after logging in.
+SEED_OWNER_EMAIL = "owner@storeye.local"
+SEED_OWNER_PASSWORD = "StoreyeOwner@123"
 
 
 def seed(database_url: str | None = None) -> bool:
@@ -60,26 +67,42 @@ def seed(database_url: str | None = None) -> bool:
 
         # Products
         products = {
-            "P-001": ("Lays Chips Masala", "IndiFoods", "Snacks", "unit", Decimal("10.00"), Decimal("7.00")),
-            "P-002": ("Maggi 2-Minute Noodles", "Nestle", "Instant Food", "unit", Decimal("14.00"), Decimal("10.50")),
-            "P-003": ("Pepsi 750ml", "PepsiCo", "Beverages", "unit", Decimal("40.00"), Decimal("30.00")),
-            "P-004": ("Haldiram Namkeen", "Haldiram", "Snacks", "unit", Decimal("25.00"), Decimal("18.00")),
+            "P-001": ("Lays Chips Masala", "Lays", "Snacks", "unit", Decimal("10.00"), Decimal("7.00"), "8901491101837", ["Lays", "chips packet", "snack packet"]),
+            "P-002": ("Maggi 2-Minute Noodles", "Nestle", "Instant Food", "unit", Decimal("14.00"), Decimal("10.50"), "8901057200233", ["Maggi", "noodles", "food packet"]),
+            "P-003": ("Pepsi 750ml", "PepsiCo", "Beverages", "unit", Decimal("40.00"), Decimal("30.00"), "8901735060182", ["Pepsi", "bottle"]),
+            "P-004": ("Haldiram Namkeen", "Haldiram", "Snacks", "unit", Decimal("25.00"), Decimal("18.00"), "8904063200058", ["Haldiram", "namkeen", "snack packet"]),
+            "P-005": ("Parle-G Biscuits", "Parle", "Biscuits", "unit", Decimal("10.00"), Decimal("8.00"), "8901064130006", ["ParleG", "biscuit packet"]),
+            "P-006": ("Amul Milk 1L", "Amul", "Dairy", "litre", Decimal("62.00"), Decimal("52.00"), "8901262030003", ["AmulMilk", "milk carton", "carton"]),
         }
         product_ids = {}
-        for sku, (name, brand, cat, unit_, price, cost) in products.items():
+        for sku, (name, brand, cat, unit_, price, cost, barcode, ai_classes) in products.items():
             prod = (
                 session.query(Product)
                 .filter(Product.store_id == store.id, Product.sku == sku)
                 .first()
             )
             if prod is None:
-                prod = Product(store_id=store.id, sku=sku, name=name, brand=brand, category=cat, unit=unit_, selling_price=price, cost_price=cost)
+                prod = Product(
+                    store_id=store.id,
+                    sku=sku,
+                    name=name,
+                    brand=brand,
+                    category=cat,
+                    unit=unit_,
+                    selling_price=price,
+                    cost_price=cost,
+                    barcode=barcode,
+                    ai_classes=ai_classes,
+                )
                 session.add(prod)
                 session.flush()
+            else:
+                prod.barcode = barcode
+                prod.ai_classes = ai_classes
             product_ids[sku] = prod.id
 
         # Inventory + movements
-        inv_qty = {sku: q for sku, q in [("P-001", 120), ("P-002", 80), ("P-003", 60), ("P-004", 45)]}
+        inv_qty = {sku: q for sku, q in [("P-001", 120), ("P-002", 80), ("P-003", 60), ("P-004", 45), ("P-005", 50), ("P-006", 40)]}
         for sku, qty in inv_qty.items():
             prod_id = product_ids[sku]
             inv = (
@@ -92,6 +115,50 @@ def seed(database_url: str | None = None) -> bool:
                 session.add(inv)
                 session.flush()
                 session.add(InventoryMovement(store_id=store.id, product_id=prod_id, quantity_change=qty, movement_type="PURCHASE", reference="SEED-OPENING"))
+
+        # Batches with realistic expiry dates
+        from datetime import timedelta
+
+        def _rel_d(days: int):
+            return date.today() + timedelta(days=days)
+
+        seed_batches = {
+            "P-001": [("LAYS-B1", _rel_d(5), 20), ("LAYS-B2", _rel_d(120), 100)],
+            "P-002": [("MAGGI-B1", _rel_d(-3), 8), ("MAGGI-B2", _rel_d(180), 72)],
+            "P-003": [("PEPSI-B1", _rel_d(60), 60)],
+            "P-004": [("HALD-B1", _rel_d(18), 15), ("HALD-B2", _rel_d(150), 30)],
+            "P-005": [("PARLE-B1", _rel_d(180), 50)],
+            "P-006": [("AMUL-B1", _rel_d(-2), 4), ("AMUL-B2", _rel_d(4), 10), ("AMUL-B3", _rel_d(20), 26)],
+        }
+        for sku, blist in seed_batches.items():
+            if sku not in product_ids:
+                continue
+            pid = product_ids[sku]
+            for bnum, bexp, bqty in blist:
+                existing = (
+                    session.query(Batch)
+                    .filter(
+                        Batch.store_id == store.id,
+                        Batch.product_id == pid,
+                        Batch.batch_number == bnum,
+                    )
+                    .first()
+                )
+                if existing is None:
+                    session.add(
+                        Batch(
+                            store_id=store.id,
+                            product_id=pid,
+                            batch_number=bnum,
+                            expiry_date=bexp,
+                            expiry_date_precision="day",
+                            quantity=bqty,
+                        )
+                    )
+                else:
+                    existing.expiry_date = bexp
+                    existing.quantity = bqty
+        session.flush()
 
         # Camera
         camera = (
@@ -187,6 +254,25 @@ def seed(database_url: str | None = None) -> bool:
                     batch_number=batch_num,
                     reference="SEED-OPENING",
                 )
+
+        # Bootstrap owner user (idempotent by email).
+        owner = (
+            session.query(User)
+            .filter(User.email == SEED_OWNER_EMAIL)
+            .first()
+        )
+        if owner is None:
+            owner = User(
+                store_id=store.id,
+                name="Store Owner",
+                mobile="9800000000",
+                role="OWNER",
+                email=SEED_OWNER_EMAIL,
+                password_hash=hash_password(SEED_OWNER_PASSWORD),
+                is_active=True,
+            )
+            session.add(owner)
+            session.flush()
 
         session.commit()
         return session.query(Store).filter(Store.name == DEMO_STORE_NAME).scalar() is not None

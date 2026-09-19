@@ -1,9 +1,10 @@
-// M21: Persistent "Demo store" badge.
+// M21/M27: Persistent real-vs-demo marker.
 //
 // A subtle, always-visible marker so a presenter (or anyone) can never confuse
 // the deterministic demo store with production data. It reads the backend demo
-// status and renders nothing unless the active store is actually flagged
-// `is_demo`, so it is safe to mount globally.
+// status: demo stores get an amber "Demo store" link, real stores get a neutral
+// "Real data" chip. While the status is unknown it renders nothing, so it is
+// safe to mount globally.
 
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -29,7 +30,19 @@ export function DemoBadge() {
     }
   }, [])
 
-  if (!status?.store_is_demo) return null
+  if (!status) return null
+
+  if (!status.store_is_demo) {
+    return (
+      <span
+        title="This store shows real observations from your cameras"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-500/25"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+        Real data
+      </span>
+    )
+  }
 
   return (
     <Link

@@ -123,12 +123,12 @@ export function PageHeader({
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
         {eyebrow && (
-          <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-white">{eyebrow}</p>
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-600">{eyebrow}</p>
         )}
         <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="font-bold !text-black">{title}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">{title}</h1>
         </div>
-        {description && <p className="mt-1 text-sm text-black/70">{description}</p>}
+        {description && <p className="mt-1 text-sm text-gray-600">{description}</p>}
       </div>
       {trailing && <div className="flex shrink-0 flex-wrap items-center gap-3">{trailing}</div>}
     </div>

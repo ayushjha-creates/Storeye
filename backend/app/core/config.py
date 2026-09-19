@@ -16,6 +16,7 @@ _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 _VALID_ENVIRONMENTS = {"development", "test", "production"}
 _VALID_REID_PROVIDERS = {"stub", "torch", "openvino"}
 _VALID_SEVERITIES = {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+_VALID_SAMESITE = {"lax", "strict", "none"}
 _POSTGRES_URL_RE = re.compile(r"^postgresql(?:\+\w+)?://")
 
 
@@ -36,7 +37,12 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
 
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -58,6 +64,32 @@ class Settings(BaseSettings):
     DEMO_RESET_KEY: str = "storeye-demo-reset"
 
     # ------------------------------------------------------------------
+    # Authentication & sessions (local/offline deployment).
+    # ------------------------------------------------------------------
+    # Name of the HttpOnly session cookie issued on login.
+    AUTH_COOKIE_NAME: str = "storeye_session"
+    # Secure flag: keep False for local HTTP development (http://localhost).
+    # Set True when the frontend/backend are served over HTTPS.
+    AUTH_COOKIE_SECURE: bool = False
+    # SameSite policy. "lax" is appropriate for a local edge web app; "strict"
+    # further limits cookie sends on cross-site navigation.
+    AUTH_COOKIE_SAMESITE: str = "lax"
+    # How long a session stays valid (and how long the cookie lives).
+    AUTH_SESSION_TTL_HOURS: float = 12.0
+    # Minimum accepted password length.
+    AUTH_PASSWORD_MIN_LENGTH: int = 8
+    # Login-attempt throttle: at most this many failed attempts per identity
+    # within the throttling window before the endpoint refuses (in-memory).
+    AUTH_LOGIN_MAX_ATTEMPTS: int = 8
+    AUTH_LOGIN_THROTTLE_SECONDS: int = 900
+    # Custom header the browser must send on every request; used to reject
+    # cross-site (CSRF) state-changing requests to cookie-authenticated routes.
+    AUTH_CSRF_HEADER: str = "X-Storeye-CSRF"
+    # Expected value for the CSRF header (the frontend client sends it on all
+    # non-GET requests; a cross-origin form cannot).
+    AUTH_CSRF_VALUE: str = "1"
+
+    # ------------------------------------------------------------------
     # Mobile-to-Edge USB Intake (M25).
     # ------------------------------------------------------------------
     # Directory a phone is copied into over USB. Empty => `<data>/intake`.
@@ -72,6 +104,13 @@ class Settings(BaseSettings):
     # Processed/failed intake files older than this are swept away; active
     # (review-pending) photos are never removed.
     INTAKE_RETENTION_DAYS: int = 7
+
+    # ------------------------------------------------------------------
+    # Browser demo-footage ingestion (camera demo section).
+    # ------------------------------------------------------------------
+    # Hard ceiling for a CCTV/phone video dropped from the browser into the
+    # Cameras page demo (bytes). 200 MB is generous for a few-minute MP4.
+    DEMO_VIDEO_MAX_MB: int = 200
 
     # Retail intelligence defaults (override via env / constructor args).
     # A product is LOW_STOCK when available_quantity <= LOW_STOCK_THRESHOLD
@@ -108,6 +147,94 @@ class Settings(BaseSettings):
     # How often (s) a stable (camera, track) is re-embedded. New tracks embed
     # immediately; stable tracks reuse their embedding in between.
     REID_UPDATE_INTERVAL_SECONDS: float = 10.0
+    # Same-camera re-acquisition (M27 Phase 2-5): re-attach a re-created local
+    # track to its prior global identity when it is the only person on the
+    # camera and the short absence is bridged by a strong appearance match.
+    # Concurrent same-camera tracks are never merged.
+    REID_SAME_CAMERA_REACQUISITION: bool = True
+    REID_SAME_CAMERA_REACQUISITION_SECONDS: float = 2.0
+    REID_SAME_CAMERA_REACQUISITION_MAX_GAP_SECONDS: float = 15.0
+    REID_SAME_CAMERA_SIMILARITY_THRESHOLD: float = 0.85
+
+    # ------------------------------------------------------------------
+    # Edge runtime (M27 Phase 17-21). Maximum number of cameras that may run
+    # concurrently on this local Edge node (0 => unlimited). A start beyond
+    # capacity is refused with a clear error instead of overloading the box.
+    # ------------------------------------------------------------------
+    EDGE_MAX_CAMERAS: int = 8
+
+    # ------------------------------------------------------------------
+    # M29 — Real-time person pipeline + minimal analytics storage. The edge
+    # runtime keeps a HOT in-memory person-state cache (Layer A) so it can
+    # resolve track->global-person and zone state at live frame rates WITHOUT
+    # per-frame database writes, and only the minimal JOURNEY ANALYTICS touch
+    # PostgreSQL (retention-bounded below). No names/faces/raw frames anywhere.
+    # ------------------------------------------------------------------
+    # How long a hot cache entry survives while a person is unseen (seconds).
+    # After this the cached state is evicted; the durable PostgreSQL analytics
+    # are governed by PERSON_ANALYTICS_RETENTION_DAYS.
+    PERSON_CACHE_TTL_SECONDS: int = 86400  # 24h
+    # Soft capacity bound for the hot cache (LRU eviction). 0 = unlimited.
+    PERSON_CACHE_MAX_ENTRIES: int = 2048
+    # Durable journey/session/zone analytics are purged after this many days
+    # (see scripts/purge_analytics.py). Never touches inventory/batches/bills.
+    PERSON_ANALYTICS_RETENTION_DAYS: int = 30
+    # A local track must be seen this many CONSECUTIVE frames before expensive
+    # person work (Re-ID association, cache promotion, zone/durable events)
+    # runs. 1 = immediate (backwards compatible). Higher values filter one-frame
+    # detector noise on busy/low-res cameras.
+    PERSON_STABLE_TRACK_MIN_FRAMES: int = 1
+    # PER-FRAME PERSON observation rows (the M13/M14 camera dashboards depend on
+    # these) are throttled by the per-camera min gap AND purged after this many
+    # hours. Set False for cache-only person analytics (recommended on very long
+    # running, high-traffic deployments).
+    PERSON_OBSERVATION_PERSISTENCE: bool = True
+    PERSON_OBSERVATION_RETENTION_HOURS: int = 24
+    # Global AI-processing cap (frames/sec) applied per camera unless the camera
+    # config overrides it. 0 = uncapped. Capture is NOT throttled — the live
+    # stream stays fluid and the AI simply processes the latest frame on time.
+    AI_TARGET_FPS: float = 0.0
+    # M30 periodic shelf-occupancy monitoring.
+    # On-disk shelf snapshot images are swept (with their DB rows) after this
+    # many days. 0 = keep forever (not recommended).
+    SHELF_SNAPSHOT_RETENTION_DAYS: int = 7
+    # M30 hot read mirror: the latest snapshot rows are ALSO cached in memory
+    # (Layer-A, one shared cache per runtime) so the monitor card + history are
+    # served without a DB round-trip. PostgreSQL stays authoritative — a cache
+    # miss falls back to SQL. These tune that mirror.
+    SHELF_SNAPSHOT_CACHE_TTL_SECONDS: int = 86400  # 24h
+    SHELF_SNAPSHOT_CACHE_MAX_ENTRIES: int = 4096
+    SHELF_SNAPSHOT_CACHE_PER_REGION_HISTORY: int = 24
+
+    # ------------------------------------------------------------------
+    # SMS bill receipts (M31). When SMS_ENABLED, creating a bill for a
+    # customer WITH a phone number automatically queues a receipt in the
+    # `sms_messages` outbox; a background worker drains it through the
+    # provider (MSG91 by default) with backoff. Billing NEVER blocks on the
+    # network — enqueueing is atomic with the bill write; a gateway failure
+    # only retries/FAILs the outbox row. Targeted sender ID is optional.
+    # ------------------------------------------------------------------
+    SMS_ENABLED: bool = False
+    SMS_PROVIDER: str = "msg91"
+    MSG91_AUTH_KEY: str = ""
+    MSG91_SENDER_ID: str = ""
+    MSG91_ROUTE: int = 4  # MSG91 route 4 = transactional
+    MSG91_COUNTRY_CODE: str = "91"
+    # Overridable for tests to point at a fake MSG91 endpoint (never a real
+    # number). Trailing slash optional; the legacy `api/sendhttp.php` path is
+    # appended at request time.
+    MSG91_BASE_URL: str = "https://control.msg91.com"
+    # Background worker poll cadence.
+    SMS_POLL_SECONDS: float = 5.0
+    # Max delivery attempts per message (1 = single try, no retry).
+    SMS_MAX_ATTEMPTS: int = 5
+    # Multiplicative backoff base: attempt N waits base * 2**(N-1) seconds.
+    SMS_RETRY_BACKOFF_SECONDS: float = 60.0
+    # A SENDING row untouched for longer than this is considered a crashed
+    # claim and re-claimed by the worker.
+    SMS_STALE_CLAIM_SECONDS: float = 30.0
+    # Per-request gateway timeout.
+    SMS_TIMEOUT_SECONDS: float = 10.0
 
     # ------------------------------------------------------------------
     # Store Intelligence (M20). Deterministic, rule-based insights that
@@ -200,6 +327,23 @@ class Settings(BaseSettings):
             )
         return v
 
+    @field_validator("AUTH_COOKIE_SAMESITE")
+    @classmethod
+    def _validate_samesite(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in _VALID_SAMESITE:
+            raise ValueError(
+                f"AUTH_COOKIE_SAMESITE must be one of {sorted(_VALID_SAMESITE)}, got {v!r}"
+            )
+        return v
+
+    @field_validator("AUTH_PASSWORD_MIN_LENGTH")
+    @classmethod
+    def _validate_min_password_length(cls, v: int) -> int:
+        if int(v) < 8:
+            raise ValueError("AUTH_PASSWORD_MIN_LENGTH must be >= 8")
+        return int(v)
+
     @field_validator("INSIGHT_TO_ALERT_SEVERITY")
     @classmethod
     def _validate_insight_severity(cls, v: str) -> str:
@@ -236,6 +380,14 @@ class Settings(BaseSettings):
         "INSIGHT_EXPIRY_TTL_HOURS",
         "INTAKE_MAX_MB",
         "INTAKE_RETENTION_DAYS",
+        "SHELF_SNAPSHOT_RETENTION_DAYS",
+        "SHELF_SNAPSHOT_CACHE_TTL_SECONDS",
+        "SHELF_SNAPSHOT_CACHE_MAX_ENTRIES",
+        "SHELF_SNAPSHOT_CACHE_PER_REGION_HISTORY",
+        "MSG91_ROUTE",
+        "SMS_MAX_ATTEMPTS",
+        "SMS_RETRY_BACKOFF_SECONDS",
+        "SMS_STALE_CLAIM_SECONDS",
     )
     @classmethod
     def _validate_non_negative(cls, v, info):
@@ -243,12 +395,47 @@ class Settings(BaseSettings):
             raise ValueError(f"{info.field_name} must be >= 0, got {v}")
         return v
 
+    @field_validator("EDGE_MAX_CAMERAS")
+    @classmethod
+    def _validate_edge_capacity(cls, v: int) -> int:
+        if int(v) < 0:
+            raise ValueError("EDGE_MAX_CAMERAS must be >= 0 (0 = unlimited)")
+        return int(v)
+
     @field_validator("INTAKE_STABILITY_SECONDS", "INTAKE_WATCH_INTERVAL_SECONDS")
     @classmethod
     def _validate_positive_seconds(cls, v: float, info) -> float:
         if float(v) <= 0:
             raise ValueError(f"{info.field_name} must be > 0, got {v}")
         return float(v)
+
+    @field_validator("SMS_POLL_SECONDS", "SMS_TIMEOUT_SECONDS")
+    @classmethod
+    def _validate_positive_sms_seconds(cls, v: float, info) -> float:
+        if float(v) <= 0:
+            raise ValueError(f"{info.field_name} must be > 0, got {v}")
+        return float(v)
+
+    @field_validator("SMS_PROVIDER")
+    @classmethod
+    def _validate_sms_provider(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v != "msg91":
+            raise ValueError(f"SMS_PROVIDER must be 'msg91', got {v!r}")
+        return v
+
+    @field_validator("MSG91_SENDER_ID")
+    @classmethod
+    def _validate_msg91_sender_id(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            return v
+        if len(v) != 6 or not v.isalnum():
+            raise ValueError(
+                "MSG91_SENDER_ID must be exactly 6 alphanumeric characters "
+                "(MSG91 requirement), got {v!r}"
+            )
+        return v
 
     @field_validator("HIGH_TRAFFIC_VISITS_FACTOR")
     @classmethod
@@ -306,6 +493,31 @@ class Settings(BaseSettings):
         if env_dir:
             return Path(env_dir).expanduser()
         return self.DATA_DIR / "intake"
+
+    @property
+    def SHELF_SNAPSHOT_DIR(self) -> Path:
+        """Root directory for periodic shelf-snapshot images (M30).
+
+        Snapshots live on disk ONLY — the `shelf_snapshots` table stores
+        relative paths. Default `<data>/shelf_snapshots`.
+        """
+        env_dir = os.getenv("STOREYE_SHELF_SNAPSHOT_DIR")
+        if env_dir:
+            return Path(env_dir).expanduser()
+        return self.DATA_DIR / "shelf_snapshots"
+
+    @property
+    def DEMO_VIDEO_DIR(self) -> Path:
+        """Directory for browser-uploaded demo CCTV footage (Cameras page).
+
+        Files are organized per store (`<data>/demo_videos/<store>/`); the
+        `cameras` table config.source points at the absolute path. Default
+        `<data>/demo_videos`.
+        """
+        env_dir = os.getenv("STOREYE_DEMO_VIDEO_DIR")
+        if env_dir:
+            return Path(env_dir).expanduser()
+        return self.DATA_DIR / "demo_videos"
 
 
 @lru_cache

@@ -18,8 +18,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
-from ...models import Observation
+from ..authz import effective_store_id, require_same_store, scoped_get
+from ..deps import get_db, require_role
+from ...models import Observation, User
 from ...schemas import (
     ActivityBucket,
     ObservationCreate,
@@ -32,20 +33,15 @@ from ...services.observations import ObservationService
 router = APIRouter(prefix="/observations", tags=["observations"])
 
 
-def _get_observation_or_404(db: Session, obs_id: UUID) -> Observation:
-    obs = db.get(Observation, obs_id)
-    if obs is None:
-        raise HTTPException(status_code=404, detail="Observation not found")
-    return obs
-
-
 @router.post(
     "", response_model=ObservationRead, status_code=status.HTTP_201_CREATED
 )
 def create_observation(
     payload: ObservationCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
+    require_same_store(current_user, payload.store_id)
     svc = ObservationService(db)
     obs = svc.record_observation(
         observation_type=payload.observation_type,
@@ -91,6 +87,7 @@ def list_observations(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Paged observation list.
 
@@ -98,9 +95,10 @@ def list_observations(
     match count (independent of offset/limit) so the UI can paginate
     correctly. Read-only: never mutates inventory or batches.
     """
+    sid = effective_store_id(current_user, store_id)
     svc = ObservationService(db)
     items, total = svc.query_observations(
-        store_id=store_id,
+        store_id=sid,
         camera_id=camera_id,
         product_id=product_id,
         observation_type=observation_type,
@@ -134,6 +132,7 @@ def observation_summary(
     ),
     hours: int = Query(default=24, ge=1, le=168, description="Look-back window"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Aggregate a bounded observation window for analytics panels.
 
@@ -141,9 +140,10 @@ def observation_summary(
     average confidence, last-seen timestamp and time-bucketed activity.
     Pure read aggregation over PostgreSQL; nothing is mutated.
     """
+    sid = effective_store_id(current_user, store_id)
     svc = ObservationService(db)
     summary = svc.observation_summary(
-        store_id=store_id,
+        store_id=sid,
         camera_id=camera_id,
         product_id=product_id,
         observation_type=observation_type,
@@ -165,5 +165,9 @@ def observation_summary(
 
 
 @router.get("/{obs_id}", response_model=ObservationRead)
-def get_observation(obs_id: UUID, db: Session = Depends(get_db)):
-    return ObservationRead.model_validate(_get_observation_or_404(db, obs_id))
+def get_observation(
+    obs_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    return ObservationRead.model_validate(scoped_get(db, current_user, Observation, obs_id))

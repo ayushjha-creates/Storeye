@@ -39,6 +39,7 @@ from app.models import (
     InventoryMovement,
 )
 from app.services.insights import InsightEngine
+from tests.conftest import bind_test_user, make_store
 
 pytestmark = pytest.mark.pg
 
@@ -48,6 +49,13 @@ TEST_DB_URL = os.getenv(
 )
 
 REF = date(2026, 8, 1)
+
+
+def _new_store(session_factory, name: str):
+    """Create a store in the test DB and authenticate as its OWNER."""
+    store = make_store(session_factory, name)
+    bind_test_user(store.id)
+    return str(store.id)
 
 
 @pytest.fixture(scope="session")
@@ -126,8 +134,7 @@ def _evaluate_inventory(session_factory, store_id):
 
 
 def test_evaluate_and_list(client, session_factory):
-    s = client.post("/api/stores", json={"name": "Insight API Mart"})
-    store_id = s.json()["id"]
+    store_id = _new_store(session_factory, "Insight API Mart")
 
     session = session_factory()
     p = _product(session, store_id, "API-1", "Milk")
@@ -157,16 +164,15 @@ def test_evaluate_and_list(client, session_factory):
     none = client.get(f"/api/insights?store_id={store_id}&type=OUT_OF_STOCK")
     assert none.json()["total"] == 0
 
-    # Store isolation
-    s2 = client.post("/api/stores", json={"name": "Empty Store"})
-    other_id = s2.json()["id"]
-    empty = client.get(f"/api/insights?store_id={other_id}")
-    assert empty.json()["total"] == 0
+    # Store isolation: reading another store's insights is rejected at the
+    # boundary (never a silent 200 with another tenant's rows).
+    other = make_store(session_factory, "Empty Store")
+    other_resp = client.get(f"/api/insights?store_id={other.id}")
+    assert other_resp.status_code == 403
 
 
 def test_list_records_do_not_leak_alert_state(client, session_factory):
-    s = client.post("/api/stores", json={"name": "List Mart"})
-    store_id = s.json()["id"]
+    store_id = _new_store(session_factory, "List Mart")
     session = session_factory()
     p = _product(session, store_id, "API-2", "Bread")
     _inventory(session, store_id, p, 0, reorder_level=4)  # OUT_OF_STOCK
@@ -179,8 +185,7 @@ def test_list_records_do_not_leak_alert_state(client, session_factory):
 
 
 def test_evaluate_dedup_over_http(client, session_factory):
-    s = client.post("/api/stores", json={"name": "Dedup Mart"})
-    store_id = s.json()["id"]
+    store_id = _new_store(session_factory, "Dedup Mart")
     session = session_factory()
     p = _product(session, store_id, "API-3", "Milk")
     _inventory(session, store_id, p, 3, reorder_level=5)
@@ -196,8 +201,7 @@ def test_evaluate_dedup_over_http(client, session_factory):
 
 
 def test_evaluate_never_mutates_domain_data(client, session_factory):
-    s = client.post("/api/stores", json={"name": "NoMutate Mart"})
-    store_id = s.json()["id"]
+    store_id = _new_store(session_factory, "NoMutate Mart")
 
     session = session_factory()
     p = _product(session, store_id, "API-4", "Sauce")
@@ -231,8 +235,7 @@ def test_evaluate_never_mutates_domain_data(client, session_factory):
 
 
 def test_summary_counts(client, session_factory):
-    s = client.post("/api/stores", json={"name": "Summary Mart"})
-    store_id = s.json()["id"]
+    store_id = _new_store(session_factory, "Summary Mart")
     session = session_factory()
     p = _product(session, store_id, "API-5", "Milk")
     _inventory(session, store_id, p, 3, reorder_level=5)
@@ -248,9 +251,8 @@ def test_summary_counts(client, session_factory):
     assert body["by_type"]["inventory"] == 1
 
 
-def test_store_health_endpoint(client):
-    s = client.post("/api/stores", json={"name": "Health Mart"})
-    store_id = s.json()["id"]
+def test_store_health_endpoint(client, session_factory):
+    store_id = _new_store(session_factory, "Health Mart")
     resp = client.get(f"/api/insights/store-health?store_id={store_id}")
     assert resp.status_code == 200
     body = resp.json()
@@ -260,8 +262,7 @@ def test_store_health_endpoint(client):
 
 
 def test_domain_category_endpoints(client, session_factory):
-    s = client.post("/api/stores", json={"name": "Domain Mart"})
-    store_id = s.json()["id"]
+    store_id = _new_store(session_factory, "Domain Mart")
     session = session_factory()
     p = _product(session, store_id, "API-6", "Yogurt")
     _inventory(session, store_id, p, 0, reorder_level=4)
@@ -288,12 +289,17 @@ def test_domain_category_endpoints(client, session_factory):
     assert flow.json()["total"] == 0
 
 
-def test_inventory_endpoint_rejects_unknown_store_product(client):
+def test_inventory_endpoint_rejects_unknown_store_product(client, session_factory):
+    store_id = _new_store(session_factory, "Unknown Product Mart")
+    # Own store, no data -> empty (200).
+    resp = client.get(f"/api/insights/inventory?store_id={store_id}")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+    # A store the caller does not own is rejected at the boundary.
     resp = client.get(
         "/api/insights/inventory?store_id=00000000-0000-0000-0000-000000000000"
     )
-    assert resp.status_code == 200
-    assert resp.json()["total"] == 0
+    assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +308,7 @@ def test_inventory_endpoint_rejects_unknown_store_product(client):
 
 
 def _seed_one_insight(client, session_factory, name="Lifecycle Mart"):
-    s = client.post("/api/stores", json={"name": name})
-    store_id = s.json()["id"]
+    store_id = _new_store(session_factory, name)
     session = session_factory()
     p = _product(session, store_id, "API-7", "Milk")
     _inventory(session, store_id, p, 3, reorder_level=5)
@@ -356,6 +361,7 @@ def test_expire_transition(client, session_factory):
     assert resp.json()["expired_at"] is not None
 
 
-def test_transition_on_unknown_insight_404(client):
+def test_transition_on_unknown_insight_404(client, session_factory):
+    _new_store(session_factory, "Unknown Insight Mart")
     resp = client.post("/api/insights/00000000-0000-0000-0000-000000000000/resolve")
     assert resp.status_code == 404

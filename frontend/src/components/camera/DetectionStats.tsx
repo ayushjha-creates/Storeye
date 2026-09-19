@@ -22,15 +22,21 @@ interface DetectionStatsProps {
 function ActivityChart({ activity }: { activity: ActivityBucket[] }) {
   const max = Math.max(1, ...activity.map((b) => b.count))
   return (
-    <div className="mt-2 flex h-20 items-end gap-1">
-      {activity.map((b) => (
-        <div
-          key={b.bucket_ts}
-          className="flex-1 rounded-t bg-brand-200 transition-colors hover:bg-brand-300"
-          style={{ height: `${Math.max(4, Math.round((b.count / max) * 100))}%` }}
-          title={`${new Date(b.bucket_ts).toLocaleString()} — ${b.count} detection(s)`}
-        />
-      ))}
+    <div className="mt-2 rounded-lg border border-gray-100 bg-gray-50/60 p-2.5">
+      <div className="flex h-16 items-end gap-1">
+        {activity.map((b) => (
+          <div
+            key={b.bucket_ts}
+            className="flex-1 rounded-t-sm bg-brand-300 transition-all duration-150 hover:bg-brand-500"
+            style={{ height: `${Math.max(6, Math.round((b.count / max) * 100))}%` }}
+            title={`${new Date(b.bucket_ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — ${b.count} detection(s)`}
+          />
+        ))}
+      </div>
+      <div className="mt-1 flex items-center justify-between text-[10px] font-medium text-gray-400">
+        <span>24h ago</span>
+        <span>Now</span>
+      </div>
     </div>
   )
 }
@@ -46,7 +52,15 @@ function Stat({ label, value, tone }: { label: string; value: string | number; t
   )
 }
 
-const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '—')
+// Canonical backend health enum -> badge (single source of truth).
+const HEALTH_BADGE: Record<string, { tone: 'green' | 'amber' | 'red' | 'gray'; label: string }> = {
+  RUNNING: { tone: 'green', label: 'RUNNING' },
+  DEGRADED: { tone: 'amber', label: 'DEGRADED' },
+  STARTING: { tone: 'amber', label: 'CONNECTING' },
+  ERROR: { tone: 'red', label: 'ERROR' },
+  STOPPED: { tone: 'gray', label: 'STOPPED' },
+  DISABLED: { tone: 'gray', label: 'DISABLED' },
+}
 
 export function DetectionStats({ camera, edge, summary }: DetectionStatsProps) {
   const byType = summary?.by_type ?? {}
@@ -55,8 +69,11 @@ export function DetectionStats({ camera, edge, summary }: DetectionStatsProps) {
   const textObs = byType.TEXT ?? 0
   const expiryObs = byType.EXPIRY_METADATA ?? 0
   const activity = Array.isArray(summary?.activity) ? summary.activity : []
+  const cfg = (camera.config ?? {}) as Record<string, unknown>
+  const cfgPipelines = (cfg.pipelines ?? {}) as Record<string, unknown>
   const productDetectionEnabled =
-    edge?.enabled_pipelines?.product_detection ?? !!(camera.config?.product_detection ?? true)
+    edge?.enabled_pipelines?.product_detection ??
+    ((cfgPipelines.product_detection ?? cfg.product_detection) !== false)
 
   const dropPct =
     edge && edge.frames_captured > 0
@@ -122,8 +139,8 @@ export function DetectionStats({ camera, edge, summary }: DetectionStatsProps) {
             <p className="mt-0.5 text-sm font-semibold text-gray-900">Local Edge runtime</p>
           </div>
           {edge ? (
-            <Badge tone={edge.running ? 'green' : 'gray'}>
-              {edge.running ? (edge.connection_ok ? 'RUNNING' : 'CONNECTING') : 'STOPPED'}
+            <Badge tone={HEALTH_BADGE[edge.health]?.tone ?? 'gray'}>
+              {HEALTH_BADGE[edge.health]?.label ?? edge.health}
             </Badge>
           ) : (
             <Badge tone="gray">UNKNOWN</Badge>
@@ -144,17 +161,60 @@ export function DetectionStats({ camera, edge, summary }: DetectionStatsProps) {
             ) : null}
             <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
               <Stat
-                label="Frames / sec"
-                value={edge.fps > 0 ? edge.fps.toFixed(1) : 'Not available'}
-                tone={edge.fps > 0 ? 'positive' : 'default'}
+                label="Capture FPS"
+                value={
+                  edge.frames_captured === 0
+                    ? 'Measuring…'
+                    : (edge.capture_fps ?? edge.fps ?? 0).toFixed(1)
+                }
+                tone={(edge.capture_fps ?? edge.fps ?? 0) > 0 ? 'positive' : 'default'}
+              />
+              <Stat
+                label="Inference FPS"
+                value={
+                  edge.frames_processed === 0
+                    ? 'Measuring…'
+                    : (edge.inference_fps ?? edge.fps ?? 0).toFixed(1)
+                }
+                tone={(edge.inference_fps ?? edge.fps ?? 0) > 0 ? 'positive' : 'default'}
               />
               <Stat label="Frames captured" value={edge.frames_captured} />
               <Stat label="Frames processed" value={edge.frames_processed} />
-              <Stat label="Frames dropped" value={edge.frames_dropped} />
             </div>
             <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-4">
               <Stat label="Drop rate" value={dropPct != null ? `${dropPct}%` : '—'} />
+              <Stat label="Frames dropped" value={edge.frames_dropped} />
+              <Stat
+                label="Inference latency"
+                value={edge.inference_ms != null ? `${edge.inference_ms.toFixed(0)} ms` : 'Measuring…'}
+              />
               <Stat label="Observations written" value={edge.observations_written} />
+            </div>
+            <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-4">
+              <Stat
+                label="AI target FPS"
+                value={(edge.ai_target_fps ?? 0) > 0 ? String(edge.ai_target_fps) : 'Uncapped'}
+              />
+              <Stat
+                label="Re-ID runs / skips"
+                value={
+                  edge.person_cache
+                    ? `${edge.person_cache.reid_invocations} / ${edge.person_cache.reid_skipped}`
+                    : 'n/a'
+                }
+              />
+              <Stat
+                label="Cache hit rate"
+                value={
+                  edge.person_cache && edge.person_cache.hits + edge.person_cache.misses > 0
+                    ? `${Math.round(
+                        (edge.person_cache.hits /
+                          (edge.person_cache.hits + edge.person_cache.misses)) *
+                          100,
+                      )}%`
+                    : 'Measuring…'
+                }
+              />
               <Stat
                 label="Uptime"
                 value={
@@ -163,8 +223,17 @@ export function DetectionStats({ camera, edge, summary }: DetectionStatsProps) {
                     : 'Not available'
                 }
               />
-              <Stat label="Last event" value={fmtTime(edge.last_event_at)} />
             </div>
+            {edge.stage_profile && Object.keys(edge.stage_profile).length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
+                <span className="font-medium">Stage latency (p50):</span>
+                {Object.entries(edge.stage_profile).map(([key, s]) => (
+                  <span key={key} className="rounded bg-gray-100 px-2 py-0.5">
+                    {key} ≈ {Number(s.p50_ms).toFixed(0)} ms
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 px-4 py-3 text-xs text-gray-500">
               <span className="font-medium">Pipelines:</span>
               {edge.enabled_pipelines ? (

@@ -18,9 +18,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
+from ..authz import require_same_store
+from ..deps import get_db, require_role
+from ...models import User
 from ...schemas import (
     CameraVisitedRead,
+    DailyFootfallListRead,
+    DailyFootfallRead,
     JourneyDetailRead,
     JourneyItemRead,
     JourneyListRead,
@@ -47,8 +51,10 @@ def journeys_summary(
     start: Optional[datetime] = Query(default=None, description="Inclusive window start (UTC)"),
     end: Optional[datetime] = Query(default=None, description="Inclusive window end (UTC)"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Header KPIs for the Anonymous Customer Journey dashboard."""
+    require_same_store(current_user, store_id)
     s = _svc(db).journey_summary(store_id=store_id, start=start, end=end)
     most = s.get("most_visited_zone")
     return JourneySummaryRead(
@@ -67,6 +73,19 @@ def journeys_summary(
     )
 
 
+@router.get("/daily", response_model=DailyFootfallListRead)
+def daily_footfall(
+    store_id: UUID,
+    days: int = Query(default=7, ge=1, le=30, description="How many trailing days to bucket"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    """Per-day unique-footfall series (sessions first-seen per UTC day)."""
+    require_same_store(current_user, store_id)
+    items = _svc(db).daily_visitors(store_id=store_id, days=days)
+    return DailyFootfallListRead(items=[DailyFootfallRead(date=i["date"], visitors=i["visitors"]) for i in items])
+
+
 @router.get("", response_model=JourneyListRead)
 def list_journeys(
     store_id: UUID,
@@ -78,8 +97,10 @@ def list_journeys(
     limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Paged anonymous journeys for one store."""
+    require_same_store(current_user, store_id)
     items, total = _svc(db).list_journeys(
         store_id=store_id,
         camera_id=camera_id,
@@ -101,8 +122,10 @@ def get_journey(
     global_person_id: str,
     store_id: UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Full timeline of one anonymous journey."""
+    require_same_store(current_user, store_id)
     detail = _svc(db).get_journey(store_id=store_id, global_person_id=global_person_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Journey not found")

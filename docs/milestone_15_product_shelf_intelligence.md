@@ -77,7 +77,7 @@ AISummaryService             -----------▶ /api/intelligence/summary
 ### Intelligence services (`backend/app/services/intelligence/`)
 | Service | Output |
 |---------|--------|
-| `shelf_intelligence.py` | `parse_shelf_regions` (validated `{code, label?, bbox}` from `camera.config.shelf_regions`, deterministic order), per-region occupancy (`occupied_pct` included), shelf states `UNKNOWN / EMPTY_VISIBLE / LOW_VISIBLE / NORMAL_VISIBLE`, majority-shelf association, per-product expectations + misplacement flags |
+| `shelf_intelligence.py` | `parse_shelf_regions` (validated `{code, label?, bbox}` from `camera.config.shelf_regions`, deterministic order), per-region occupancy (`occupied_pct` included) with temporal smoothing (`occupancy_method` `raw`/`median_60s`), shelf states `UNKNOWN / EMPTY_VISIBLE / LOW_VISIBLE / NORMAL_VISIBLE` (LOW = half full or less, `LOW_OCCUPANCY_FRACTION=0.5`) plus `refill_recommended`, majority-shelf association, per-product expectations + misplacement flags. Consumed by the M16 alert layer (`SHELF_EMPTY` / `LOW_SHELF_OCCUPANCY` refill alerts). |
 | `product_intelligence.py` | per (class, camera) rows: visible quantity (shared counting), mapped product + DB quantity, `comparison_status` `MATCH / POSSIBLE_SHORTAGE / POSSIBLE_SURPLUS / NO_INVENTORY / NOT_ASSESSED`, shelf association message |
 | `misplacement.py` | `POSSIBLE_MISPLACEMENT` only for **mapped** products whose shelf has an active `PlanogramItem` expectation excluding them; unmapped classes / no expectation never flagged |
 | `ai_summary.py` | 24 h digest: cameras (active/ai-running/regions configured), people, products (visible/mapped/unmapped/total quantity), shelves (states + possible misplacements), reconciliation counters |

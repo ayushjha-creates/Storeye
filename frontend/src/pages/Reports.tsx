@@ -11,7 +11,8 @@ import { storeApi } from '../lib/api/zone'
 import { saleApi } from '../lib/api/sales'
 import { billApi } from '../lib/api/bills'
 import { productApi } from '../lib/api/products'
-import type { Bill, Product, Sale } from '../lib/api/types'
+import { journeyApi } from '../lib/api/journeys'
+import type { Bill, DailyFootfallPoint, Product, Sale } from '../lib/api/types'
 import { IconBox, IconReceipt, IconRupee } from '../components/ui/icons'
 
 const DAY_MS = 86_400_000
@@ -47,6 +48,7 @@ export function ReportsPage() {
   const [sales, setSales] = useState<Sale[]>([])
   const [bills, setBills] = useState<Bill[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [footfall, setFootfall] = useState<DailyFootfallPoint[]>([])
   const [error, setError] = useState<unknown>(null)
   const [loading, setLoading] = useState(true)
 
@@ -63,14 +65,16 @@ export function ReportsPage() {
       } catch {
         // continue
       }
-      const [saleRes, billRes, prodRes] = await Promise.all([
+      const [saleRes, billRes, prodRes, footfallRes] = await Promise.all([
         sid ? saleApi.list({ store_id: sid }) : saleApi.list(),
         sid ? billApi.list({ store_id: sid }) : billApi.list(),
         sid ? productApi.list({ store_id: sid }) : productApi.list(),
+        sid ? journeyApi.daily({ store_id: sid, days: 14 }).catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
       ])
       setSales(saleRes.items)
       setBills(billRes.items)
       setProducts(prodRes.items)
+      setFootfall(footfallRes.items ?? [])
     } catch (err) {
       setError(err)
     } finally {
@@ -203,6 +207,42 @@ export function ReportsPage() {
                       </li>
                     ))}
                   </ul>
+                </>
+              )}
+            </Card>
+
+            {/* Store Footfall Trends */}
+            <Card
+              title="Store Footfall · 14d"
+              subtitle="Daily visitor count detected by store cameras"
+            >
+              {footfall.length === 0 || footfall.reduce((s, p) => s + p.visitors, 0) === 0 ? (
+                <EmptyState
+                  title="No footfall recorded yet"
+                  hint="Footfall is counted as people are detected by your store cameras."
+                />
+              ) : (
+                <>
+                  <BarChart
+                    data={footfall.map((p) => {
+                      const d = new Date(p.date)
+                      return {
+                        label: d.toLocaleDateString(undefined, { weekday: 'short' }),
+                        value: p.visitors,
+                        sub: String(p.visitors),
+                      }
+                    })}
+                    color="#0ea5e9"
+                    height={160}
+                  />
+                  <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
+                    <span>
+                      Total visitors (14d): <strong className="text-gray-900">{footfall.reduce((s, p) => s + p.visitors, 0)}</strong>
+                    </span>
+                    <span>
+                      Avg: <strong className="text-gray-900">{Math.round(footfall.reduce((s, p) => s + p.visitors, 0) / footfall.length)}</strong>/day
+                    </span>
+                  </div>
                 </>
               )}
             </Card>

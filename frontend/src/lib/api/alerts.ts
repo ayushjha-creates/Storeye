@@ -65,6 +65,7 @@ export const ALERT_TYPE_LABEL: Record<AlertType, string> = {
   MISPLACEMENT: 'Misplacement',
   EXPIRY: 'Expiry',
   LOW_SHELF_OCCUPANCY: 'Low shelf occupancy',
+  SHELF_EMPTY: 'Shelf empty',
   CAMERA_OFFLINE: 'Camera offline',
   REVIEW_REQUIRED: 'Review required',
 }
@@ -77,6 +78,7 @@ export const ALERT_TYPE_ORDER: AlertType[] = [
   'MISPLACEMENT',
   'EXPIRY',
   'LOW_SHELF_OCCUPANCY',
+  'SHELF_EMPTY',
   'CAMERA_OFFLINE',
   'REVIEW_REQUIRED',
 ]

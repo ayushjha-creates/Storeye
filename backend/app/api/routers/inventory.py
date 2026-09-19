@@ -24,8 +24,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
-from ...models import Batch, Inventory, InventoryMovement, Product, Store
+from ..authz import effective_store_id, require_same_store, scoped_get
+from ..deps import get_db, require_role
+from ...core.auth import ROLE_MANAGER
+from ...models import Batch, Inventory, InventoryMovement, Product, Store, User
 from ...schemas import (
     AdjustStockIn,
     BatchCreate,
@@ -50,9 +52,13 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
 # ---------------------------------------------------------------------------
 @router.get("/stores/{store_id}/products/{product_id}", response_model=InventoryRead)
 def get_product_inventory(
-    store_id: UUID, product_id: UUID, db: Session = Depends(get_db)
+    store_id: UUID,
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
-    if db.get(Product, product_id) is None:
+    require_same_store(current_user, store_id)
+    if scoped_get(db, current_user, Product, product_id).store_id != store_id:
         raise HTTPException(status_code=404, detail="Product not found")
     inv = db.scalar(
         select(Inventory).where(
@@ -82,9 +88,13 @@ def get_product_inventory(
     response_model=InventorySummaryRead,
 )
 def get_product_summary(
-    store_id: UUID, product_id: UUID, db: Session = Depends(get_db)
+    store_id: UUID,
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
-    if db.get(Product, product_id) is None:
+    require_same_store(current_user, store_id)
+    if scoped_get(db, current_user, Product, product_id).store_id != store_id:
         raise HTTPException(status_code=404, detail="Product not found")
     svc = InventoryService(db)
     aggregate, batches = svc.get_product_batch_summary(store_id, product_id)
@@ -103,8 +113,10 @@ def list_movements(
     store_id: UUID,
     product_id: UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
-    if db.get(Product, product_id) is None:
+    require_same_store(current_user, store_id)
+    if scoped_get(db, current_user, Product, product_id).store_id != store_id:
         raise HTTPException(status_code=404, detail="Product not found")
     stmt = (
         select(InventoryMovement)
@@ -129,10 +141,12 @@ def list_product_batches(
     store_id: UUID,
     product_id: UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
+    require_same_store(current_user, store_id)
     if db.get(Store, store_id) is None:
         raise HTTPException(status_code=404, detail="Store not found")
-    if db.get(Product, product_id) is None:
+    if scoped_get(db, current_user, Product, product_id).store_id != store_id:
         raise HTTPException(status_code=404, detail="Product not found")
     batches = BatchService(db).get_batches_for_product(store_id, product_id)
     return BatchList(
@@ -149,7 +163,12 @@ def list_product_batches(
     response_model=InventoryMovementRead,
     status_code=status.HTTP_201_CREATED,
 )
-def receive_stock(payload: ReceiveStockIn, db: Session = Depends(get_db)):
+def receive_stock(
+    payload: ReceiveStockIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    require_same_store(current_user, payload.store_id)
     svc = InventoryService(db)
     movement = svc.receive_stock(
         store_id=payload.store_id,
@@ -164,7 +183,12 @@ def receive_stock(payload: ReceiveStockIn, db: Session = Depends(get_db)):
 
 
 @router.post("/adjust", response_model=InventoryMovementRead)
-def adjust_stock(payload: AdjustStockIn, db: Session = Depends(get_db)):
+def adjust_stock(
+    payload: AdjustStockIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
+    require_same_store(current_user, payload.store_id)
     svc = InventoryService(db)
     movement = svc.adjust_stock(
         store_id=payload.store_id,
@@ -184,7 +208,12 @@ def adjust_stock(payload: AdjustStockIn, db: Session = Depends(get_db)):
     response_model=InventoryMovementRead,
     status_code=status.HTTP_201_CREATED,
 )
-def record_movement(payload: RecordMovementIn, db: Session = Depends(get_db)):
+def record_movement(
+    payload: RecordMovementIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    require_same_store(current_user, payload.store_id)
     svc = InventoryService(db)
     movement = svc.record_movement(
         store_id=payload.store_id,
@@ -207,10 +236,12 @@ def set_reorder_levels(
     product_id: UUID,
     payload: InventorySetReorder,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
 ):
+    require_same_store(current_user, store_id)
     if db.get(Store, store_id) is None:
         raise HTTPException(status_code=404, detail="Store not found")
-    if db.get(Product, product_id) is None:
+    if scoped_get(db, current_user, Product, product_id).store_id != store_id:
         raise HTTPException(status_code=404, detail="Product not found")
     inv = db.scalar(
         select(Inventory).where(
@@ -244,8 +275,13 @@ def set_reorder_levels(
 @router.post(
     "/batches", response_model=BatchRead, status_code=status.HTTP_201_CREATED
 )
-def create_batch(payload: BatchCreate, db: Session = Depends(get_db)):
-    if db.get(Product, payload.product_id) is None:
+def create_batch(
+    payload: BatchCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
+    require_same_store(current_user, payload.store_id)
+    if scoped_get(db, current_user, Product, payload.product_id).store_id != payload.store_id:
         raise HTTPException(status_code=404, detail="Product not found")
     if db.get(Store, payload.store_id) is None:
         raise HTTPException(status_code=404, detail="Store not found")
@@ -268,11 +304,12 @@ def list_all_batches(
     store_id: Optional[UUID] = None,
     product_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
-    stmt = select(Batch)
-    if store_id is not None:
-        stmt = stmt.where(Batch.store_id == store_id)
+    sid = effective_store_id(current_user, store_id)
+    stmt = select(Batch).where(Batch.store_id == sid)
     if product_id is not None:
+        scoped_get(db, current_user, Product, product_id)
         stmt = stmt.where(Batch.product_id == product_id)
     items = db.scalars(stmt.order_by(Batch.batch_number)).all()
     return BatchList(
@@ -281,25 +318,27 @@ def list_all_batches(
 
 
 @router.get("/batches/{batch_id}", response_model=BatchRead)
-def get_batch(batch_id: UUID, db: Session = Depends(get_db)):
-    batch = db.get(Batch, batch_id)
-    if batch is None:
-        raise HTTPException(status_code=404, detail="Batch not found")
-    return BatchRead.model_validate(batch)
+def get_batch(
+    batch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    return BatchRead.model_validate(scoped_get(db, current_user, Batch, batch_id))
 
 
 @router.patch("/batches/{batch_id}", response_model=BatchRead)
 def update_batch(
-    batch_id: UUID, payload: BatchUpdate, db: Session = Depends(get_db)
+    batch_id: UUID,
+    payload: BatchUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
 ):
     """Update batch metadata (expiry, mrp, manufacturing date).
 
     Inventory-related fields (quantity) are NOT updated here — quantity
     changes must go through InventoryService to preserve atomicity.
     """
-    batch = db.get(Batch, batch_id)
-    if batch is None:
-        raise HTTPException(status_code=404, detail="Batch not found")
+    batch = scoped_get(db, current_user, Batch, batch_id)
     if payload.manufacturing_date is not None:
         batch.manufacturing_date = payload.manufacturing_date
     if payload.expiry_date is not None:

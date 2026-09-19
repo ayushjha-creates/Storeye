@@ -284,6 +284,39 @@ stop_pidfile() {
   ok "$name stopped"
 }
 
+# spawn_detached PIDFILE CWD LOGFILE CMD [ARGS...]
+# Spawns a background process in a new session (setsid) so terminal closures/SIGHUP never kill it.
+spawn_detached() {
+  local pidfile="$1" cwd="$2" logfile="$3"
+  shift 3
+  local py; py="$(python_bin)"
+  if [ -n "$py" ]; then
+    "$py" - "$pidfile" "$cwd" "$logfile" "$@" <<'PY'
+import sys, subprocess, os
+pidfile, cwd, logfile = sys.argv[1], sys.argv[2], sys.argv[3]
+cmd = sys.argv[4:]
+with open(logfile, "a") as log:
+    p = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=os.environ.copy(),
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+with open(pidfile, "w") as pf:
+    pf.write(f"{p.pid}\n")
+PY
+  else
+    (
+      cd "$cwd"
+      nohup "$@" < /dev/null >> "$logfile" 2>&1 &
+      echo $! > "$pidfile"
+    )
+  fi
+}
+
 # -- HTTP helpers ------------------------------------------------------------
 wait_for_http() {
   local url="$1" timeout="${2:-60}" i=0

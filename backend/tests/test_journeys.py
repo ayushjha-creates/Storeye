@@ -22,12 +22,13 @@ The whole suite is PostgreSQL-backed (pytest marker `pg`).
 
 from __future__ import annotations
 
+import math
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.base import Base
@@ -534,6 +535,134 @@ def test_n_no_embedding_columns(session, model_cls):
 
 
 # ---------------------------------------------------------------------------
+# O..V — same-camera re-acquisition (M27 Phase 2-5)
+#
+# One physical person must yield ONE local track -> ONE global id -> ONE
+# journey. ByteTrack re-creates track ids on brief misses, so a same-camera
+# reconnect is allowed ONLY when the absence is short, the appearance match is
+# strong, and no other person is currently visible on that camera.
+# ---------------------------------------------------------------------------
+
+def _unit(*vals: float) -> PersonEmbedding:
+    norm = math.sqrt(sum(v * v for v in vals)) or 1.0
+    return PersonEmbedding([v / norm for v in vals], provider="stub")
+
+
+# Two embeddings of the same person (cosine ~0.999) and one of another person.
+_SAME_A = _unit(1.0, 0.0, 0.0, 0.0)
+_SAME_A_ALT = _unit(1.0, 0.05, 0.0, 0.0)
+_OTHER = _unit(0.0, 1.0, 0.0, 0.0)
+
+
+def _manager(*, same_camera: bool = True) -> GlobalIdentityManager:
+    return GlobalIdentityManager(
+        config=ReIDConfig(
+            enabled=True,
+            provider="stub",
+            similarity_threshold=0.4,
+            same_camera_reacquisition=same_camera,
+        ),
+        provider=STUB,
+    )
+
+
+def _see(manager, cam, track, at, embedding):
+    return manager.associate(
+        PersonSighting("store:o", cam, track, at, embedding=embedding)
+    )
+
+
+def test_o_same_track_keeps_identity_and_session(session):
+    manager = _manager()
+    m1 = _see(manager, "cam:entrance", 1, T0, _SAME_A)
+    m2 = _see(manager, "cam:entrance", 1, T0 + timedelta(seconds=8), _SAME_A_ALT)
+    assert m1.created and not m2.created
+    assert m2.global_person_id == m1.global_person_id
+    assert manager.active_identity_count() == 1
+
+
+def test_p_same_camera_reacquisition_reconnects_lost_track(session):
+    manager = _manager()
+    m1 = _see(manager, "cam:entrance", 1, T0, _SAME_A)
+    # track 1 died; ByteTrack re-creates the same person as track 2 after 5s.
+    m2 = _see(manager, "cam:entrance", 2, T0 + timedelta(seconds=5), _SAME_A_ALT)
+    assert m1.created
+    assert m2.created is False
+    assert m2.global_person_id == m1.global_person_id
+    assert manager.active_identity_count() == 1
+
+
+def test_q_same_camera_reacquisition_disabled_creates_new_identity(session):
+    manager = _manager(same_camera=False)
+    m1 = _see(manager, "cam:entrance", 1, T0, _SAME_A)
+    m2 = _see(manager, "cam:entrance", 2, T0 + timedelta(seconds=5), _SAME_A_ALT)
+    assert m1.created and m2.created
+    assert m2.global_person_id != m1.global_person_id
+
+
+def test_r_same_camera_reacquisition_requires_strong_appearance(session):
+    manager = _manager()
+    m1 = _see(manager, "cam:entrance", 1, T0, _SAME_A)
+    # Same camera, past the absence window, but a different-looking person.
+    m2 = _see(manager, "cam:entrance", 2, T0 + timedelta(seconds=5), _OTHER)
+    assert m1.created and m2.created
+    assert m2.global_person_id != m1.global_person_id
+
+
+def test_s_same_camera_reacquisition_refuses_long_absence(session):
+    manager = _manager()
+    m1 = _see(manager, "cam:entrance", 1, T0, _SAME_A)
+    # Beyond same_camera_reacquisition_max_gap_seconds (15s) => new session.
+    m2 = _see(manager, "cam:entrance", 2, T0 + timedelta(seconds=20), _SAME_A_ALT)
+    assert m1.created and m2.created
+    assert m2.global_person_id != m1.global_person_id
+
+
+def test_t_concurrent_same_camera_people_never_merge(session):
+    manager = _manager()
+    m1 = _see(manager, "cam:entrance", 1, T0, _SAME_A)
+    # Person 2 arrives 5s later; person 1's track is stale but person 2 is
+    # ACTIVE on this camera, so a third track must not reattach to person 1.
+    m2 = _see(manager, "cam:entrance", 2, T0 + timedelta(seconds=5), _OTHER)
+    m3 = _see(manager, "cam:entrance", 3, T0 + timedelta(seconds=5), _SAME_A_ALT)
+    assert m1.created and m2.created
+    assert m2.global_person_id != m1.global_person_id
+    assert m3.global_person_id != m1.global_person_id
+    assert manager.active_identity_count() == 3
+
+
+def test_u_reacquired_identity_reuses_one_journey(session):
+    manager = _manager()
+    first = _see(manager, "cam:entrance", 1, T0, _SAME_A)
+    reacquired = _see(
+        manager, "cam:entrance", 2, T0 + timedelta(seconds=5), _SAME_A_ALT
+    )
+    store = _make_store(session, "u")
+    cam = _make_camera(session, store, "entrance")
+    session.commit()
+
+    svc = _svc(session)
+    svc.upsert_track_association(
+        store_id=store.id, global_person_id=first.global_person_id,
+        camera_id=cam.id, track_id=1, confidence=CONF_UNKNOWN, timestamp=T0,
+    )
+    svc.upsert_track_association(
+        store_id=store.id, global_person_id=reacquired.global_person_id,
+        camera_id=cam.id, track_id=2, confidence=CONF_UNKNOWN,
+        timestamp=T0 + timedelta(seconds=5),
+    )
+    items, total = svc.list_journeys(store_id=store.id)
+    assert total == 1  # one physical person => one journey
+    assert items[0]["global_person_id"] == first.global_person_id
+    rows = session.scalars(
+        select(PersonTrackAssociation).where(
+            PersonTrackAssociation.global_person_id == first.global_person_id
+        )
+    ).all()
+    assert {r.track_id for r in rows} == {1, 2}  # both local tracks recorded
+
+
+# ---------------------------------------------------------------------------
 # Confidence mapping sanity
 # ---------------------------------------------------------------------------
 
@@ -544,3 +673,234 @@ def test_confidence_mapping(session):
     assert confidence_from_score(0.95, config).value == CONF_HIGH
     assert confidence_from_score(0.8, config).value == CONF_MEDIUM
     assert confidence_from_score(0.5, config).value == CONF_LOW
+
+
+# ---------------------------------------------------------------------------
+# M27 Phase 6/27 — journey-scoped dev reset touches ONLY journey tables
+# ---------------------------------------------------------------------------
+
+def test_reset_journeys_deletes_only_target_store(session):
+    from app.models import Observation, OBS_PERSON
+    from scripts.reset_journeys import _delete
+
+    store_a = _make_store(session, "reset-a")
+    store_b = _make_store(session, "reset-b")
+    cam_a = _make_camera(session, store_a, "entrance")
+    cam_b = _make_camera(session, store_b, "entrance")
+    session.commit()
+
+    svc = _svc(session)
+    for st, cam, gid in ((store_a, cam_a, "gid-a"), (store_b, cam_b, "gid-b")):
+        svc.upsert_track_association(
+            store_id=st.id, global_person_id=gid, camera_id=cam.id,
+            track_id=1, confidence=CONF_UNKNOWN, timestamp=T0,
+        )
+    obs = Observation(
+        store_id=store_a.id, camera_id=cam_a.id, observation_type=OBS_PERSON,
+        confidence=0.9, observed_at=T0,
+    )
+    session.add(obs)
+    session.commit()
+
+    deleted = _delete(session, store_a.id)
+    session.commit()
+
+    assert deleted["global_person_sessions"] == 1
+    assert deleted["person_track_associations"] == 1
+
+    # Store B's journey is untouched.
+    _, b_total = svc.list_journeys(store_id=store_b.id)
+    assert b_total == 1
+    # Non-journey business data (observations) is untouched.
+    assert session.get(Observation, obs.id) is not None
+
+
+def test_v_daily_footfall_buckets_sessions_by_utc_day(session):
+    store = _make_store(session, "footfall")
+    other = _make_store(session, "footfall-other")
+    midnight = datetime.combine(
+        datetime.now(timezone.utc).date(), datetime.min.time(), tzinfo=timezone.utc
+    )
+    rows = [
+        # today: two sessions
+        (store, "g1", midnight + timedelta(hours=1)),
+        (store, "g2", midnight + timedelta(hours=4)),
+        # yesterday: one
+        (store, "g3", midnight - timedelta(hours=6)),
+        # two days ago: one
+        (store, "g4", midnight - timedelta(hours=30)),
+        # other store: today, must not leak
+        (other, "g5", midnight + timedelta(hours=2)),
+    ]
+    for st, gid, ts in rows:
+        session.add(
+            GlobalPersonSession(
+                store_id=st.id, global_person_id=gid,
+                first_seen_at=ts, last_seen_at=ts + timedelta(seconds=100),
+                confidence=CONF_UNKNOWN,
+            )
+        )
+    session.commit()
+
+    items = _svc(session).daily_visitors(store_id=store.id, days=3)
+    assert len(items) == 3
+    assert items[0]["date"] < items[1]["date"] < items[2]["date"]
+    assert items[-1]["visitors"] == 2  # today
+    assert items[-2]["visitors"] == 1  # yesterday
+    assert items[-3]["visitors"] == 1  # two days ago
+    # Days with no sessions are zero-filled.
+    items5 = _svc(session).daily_visitors(store_id=store.id, days=5)
+    assert items5[0]["visitors"] == 0
+    # Other store sees only its own session (its today bucket is 1),
+    # and store's own buckets never mixed in g5.
+    items_other = _svc(session).daily_visitors(store_id=other.id, days=3)
+    assert items_other[-1]["visitors"] == 1
+    assert items_other[0]["visitors"] == 0 and items_other[1]["visitors"] == 0
+    # Bounds.
+    items30 = _svc(session).daily_visitors(store_id=store.id, days=30)
+    assert len(items30) == 30
+
+
+# ---------------------------------------------------------------------------
+# M29 — retention purge (minimal durable analytics, business data untouched)
+# ---------------------------------------------------------------------------
+
+def test_purge_analytics_removes_old_and_keeps_fresh(session):
+    store = _make_store(session, "retention")
+    cam = _make_camera(session, store, "entrance")
+    zone = _make_zone(session, store, "billing")
+    session.commit()
+
+    svc = _svc(session)
+    now = datetime.now(timezone.utc)
+    old_ts = now - timedelta(days=45)
+    fresh_ts = now - timedelta(days=2)
+
+    # Old journey rows (45 days old) + fresh rows (2 days old).
+    svc.upsert_track_association(
+        store_id=store.id, global_person_id="old-gid", camera_id=cam.id,
+        track_id=1, confidence=CONF_UNKNOWN, timestamp=old_ts,
+    )
+    svc.record_transition(
+        store_id=store.id, global_person_id="old-gid",
+        from_camera_id=cam.id, to_camera_id=cam.id, timestamp=old_ts,
+        confidence=CONF_UNKNOWN,
+    )
+    svc.open_zone_visit(
+        store_id=store.id, global_person_id="old-gid", zone_id=zone.id,
+        camera_id=cam.id, timestamp=old_ts, confidence=CONF_UNKNOWN,
+    )
+
+    svc.upsert_track_association(
+        store_id=store.id, global_person_id="fresh-gid", camera_id=cam.id,
+        track_id=2, confidence=CONF_UNKNOWN, timestamp=fresh_ts,
+    )
+    svc.open_zone_visit(
+        store_id=store.id, global_person_id="fresh-gid", zone_id=zone.id,
+        camera_id=cam.id, timestamp=fresh_ts, confidence=CONF_UNKNOWN,
+    )
+
+    deleted = svc.purge_analytics(store_id=store.id, retention_days=30)
+    session.commit()
+
+    assert deleted["sessions"] == 1
+    assert deleted["track_associations"] == 1
+    assert deleted["transitions"] == 1
+    assert deleted["zone_visits"] == 1
+
+    # Fresh journey survives.
+    _, total = svc.list_journeys(store_id=store.id)
+    assert total == 1
+    journey = svc.get_journey(store.id, "fresh-gid")
+    assert journey is not None
+    assert len(journey["zone_visits"]) == 1
+
+    # Business rows (camera/zone) untouched.
+    assert session.get(Camera, cam.id) is not None
+    assert session.get(Zone, zone.id) is not None
+
+
+def test_purge_analytics_is_store_scoped_and_never_touches_observations(session):
+    from app.models import Observation, OBS_PERSON, OBS_PRODUCT
+
+    store_a = _make_store(session, "retention-a")
+    store_b = _make_store(session, "retention-b")
+    cam_a = _make_camera(session, store_a, "entrance")
+    session.commit()
+
+    now = datetime.now(timezone.utc)
+    old_ts = now - timedelta(days=60)
+    svc = _svc(session)
+    svc.upsert_track_association(
+        store_id=store_a.id, global_person_id="g-a", camera_id=cam_a.id,
+        track_id=1, confidence=CONF_UNKNOWN, timestamp=old_ts,
+    )
+    svc.upsert_track_association(
+        store_id=store_b.id, global_person_id="g-b", camera_id=cam_a.id,
+        track_id=9, confidence=CONF_UNKNOWN, timestamp=old_ts,
+    )
+    # A PERSON observation and a PRODUCT observation tied to store A: the purge
+    # must NOT delete observations (that is the ObservationService's job).
+    session.add(
+        Observation(
+            store_id=store_a.id, camera_id=cam_a.id,
+            observation_type=OBS_PERSON, confidence=0.9, observed_at=old_ts,
+        )
+    )
+    session.add(
+        Observation(
+            store_id=store_a.id, camera_id=cam_a.id,
+            observation_type=OBS_PRODUCT, confidence=0.9, observed_at=old_ts,
+        )
+    )
+    session.commit()
+
+    deleted = svc.purge_analytics(store_id=store_a.id, retention_days=30)
+    session.commit()
+
+    assert deleted["sessions"] == 1  # only store A's old session
+    b_sessions = session.scalar(
+        select(func.count()).select_from(GlobalPersonSession).where(
+            GlobalPersonSession.store_id == store_b.id
+        )
+    )
+    assert b_sessions == 1  # store B's journey is untouched
+    assert session.scalar(
+        select(func.count()).select_from(Observation).where(Observation.store_id == store_a.id)
+    ) == 2  # observations are NEVER part of the journey purge
+
+
+def test_purge_person_observations_only_person_and_only_stale(session):
+    from app.models import Observation, OBS_PERSON, OBS_PRODUCT
+    from app.services.observations.observation_service import ObservationService
+
+    store = _make_store(session, "obs-retention")
+    cam = _make_camera(session, store, "entrance")
+    session.commit()
+
+    now = datetime.now(timezone.utc)
+    svc = ObservationService(session)
+    for ts, otype in (
+        (now - timedelta(hours=50), OBS_PERSON),   # stale person
+        (now - timedelta(hours=1), OBS_PERSON),    # fresh person
+        (now - timedelta(hours=50), OBS_PRODUCT),  # stale product (never purged)
+    ):
+        session.add(
+            Observation(
+                store_id=store.id, camera_id=cam.id,
+                observation_type=otype, confidence=0.9, observed_at=ts,
+            )
+        )
+    session.commit()
+
+    deleted = svc.purge_person_observations(
+        store_id=store.id, retention_hours=24
+    )
+    session.commit()
+
+    assert deleted == 1  # only the stale PERSON row
+    remaining = session.scalars(
+        select(Observation.observation_type).where(Observation.store_id == store.id)
+    ).all()
+    assert OBS_PERSON in remaining      # fresh person row kept
+    assert OBS_PRODUCT in remaining     # product row never touched

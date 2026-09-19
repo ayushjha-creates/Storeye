@@ -14,12 +14,35 @@ export function edgeStreamUrl(cameraId: string): string {
   return `${API_BASE}/api/edge/cameras/${cameraId}/stream`
 }
 
+export interface EdgeDemoVideoRead {
+  camera_id: string
+  name: string
+  running: boolean
+  filename: string
+  size: number
+  source: string
+  note: string
+}
+
 export const edgeApi = {
   status: () => api.get<EdgeStatus>('/api/edge/status'),
   cameras: () => api.get<EdgeCameraStatus[]>('/api/edge/cameras'),
   camera: (cameraId: string) => api.get<EdgeCameraStatus>(`/api/edge/cameras/${cameraId}`),
   start: (cameraId: string) => api.post<EdgeStartResponse>(`/api/edge/cameras/${cameraId}/start`),
   stop: (cameraId: string) => api.post<EdgeStartResponse>(`/api/edge/cameras/${cameraId}/stop`),
+  uploadDemoVideo: (file: File, storeId?: string | null, name?: string) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (storeId) fd.append('store_id', storeId)
+    if (name) fd.append('name', name)
+    return api.postFormData<EdgeDemoVideoRead>('/api/edge/demo-video', fd)
+  },
+  demoSample: (sampleKey: 'people' | 'shelf' = 'people', storeId?: string | null) => {
+    const fd = new FormData()
+    fd.append('sample_key', sampleKey)
+    if (storeId) fd.append('store_id', storeId)
+    return api.postFormData<EdgeDemoVideoRead>('/api/edge/demo-sample', fd)
+  },
   streamUrl: edgeStreamUrl,
 }
 

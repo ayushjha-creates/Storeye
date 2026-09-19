@@ -84,7 +84,9 @@ export function ShelfIntelligencePage() {
       alerts
         .filter(
           (a) =>
-            a.alert_type === 'LOW_SHELF_OCCUPANCY' || a.alert_type === 'MISPLACEMENT',
+            a.alert_type === 'LOW_SHELF_OCCUPANCY' ||
+            a.alert_type === 'SHELF_EMPTY' ||
+            a.alert_type === 'MISPLACEMENT',
         )
         .slice(0, 5),
     [alerts],
@@ -135,14 +137,14 @@ export function ShelfIntelligencePage() {
           <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
             <Stat label="Regions" value={rows.length} hint="Configured shelf_regions" />
             <Stat label="OK" value={shelfStats.ok} tone="positive" />
-            <Stat label="Low" value={shelfStats.low} hint="Below 35% occupancy" tone={shelfStats.low ? 'warning' : 'default'} />
+            <Stat label="Low" value={shelfStats.low} hint="Half full or less" tone={shelfStats.low ? 'warning' : 'default'} />
             <Stat label="Empty (visible)" value={shelfStats.empty} hint="No visible product" tone={shelfStats.empty ? 'danger' : 'default'} />
             <Stat label="Possible misplaced" value={shelfStats.misplaced} tone={shelfStats.misplaced ? 'warning' : 'default'} />
           </div>
 
           <Card
             title="Shelves"
-            subtitle="Occupancy is an AI estimate (product bbox area within the region). ‘Unknown’ means the camera produced no AI data in the window."
+            subtitle="Occupancy is an AI estimate (product bbox area within the region), smoothed over time when enough samples exist. ‘Unknown’ means the camera produced no AI data in the window."
           >
             {rows.length === 0 ? (
               <EmptyState
@@ -189,7 +191,26 @@ export function ShelfIntelligencePage() {
                             }}
                           />
                         </div>
+                        {r.occupancy_method === 'median_60s' && r.occupancy_samples ? (
+                          <p className="mt-1 text-[11px] text-gray-400">
+                            Smoothed over {r.occupancy_samples} time samples
+                          </p>
+                        ) : null}
                       </div>
+
+                      {r.refill_recommended ? (
+                        <p
+                          className={`mt-1 text-[11px] font-medium ${
+                            r.detection_status === 'EMPTY_VISIBLE'
+                              ? 'text-red-600'
+                              : 'text-amber-600'
+                          }`}
+                        >
+                          {r.detection_status === 'EMPTY_VISIBLE'
+                            ? 'Refill now — shelf appears empty'
+                            : 'Refill soon — about to get empty'}
+                        </p>
+                      ) : null}
 
                       {r.last_analysis_message ? (
                         <p className="mt-2 text-xs text-gray-400">{r.last_analysis_message}</p>

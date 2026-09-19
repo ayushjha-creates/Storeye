@@ -483,19 +483,26 @@ class TestDemoResetIsolation:
 # ---------------------------------------------------------------------------
 @pytest.fixture()
 def http_client(tmp_path):
+    from uuid import uuid4
+
     from fastapi.testclient import TestClient
     from app.main import app
     from app.services.mobile_intake.manager import (
         configure_intake_manager,
         reset_intake_manager,
     )
+    from tests.conftest import bind_test_user, unbind_test_user
 
     service = MobileIntakeService(tmp_path, scanner=FakeScanner(), stability_sec=0.05)
     service.ensure_dirs()
     service.load_index()
     configure_intake_manager(service)
+    # The M25 HTTP layer is authenticated (STAFF+); bind a fake store user so
+    # these no-DB tests exercise the routing without a real session backend.
+    bind_test_user(uuid4())
     with TestClient(app) as c:
         yield c, service
+    unbind_test_user()
     reset_intake_manager()
 
 
@@ -536,6 +543,22 @@ class TestHttpApi:
         r = client.post(f"/api/mobile-intake/jobs/{job['job_id']}/close")
         assert r.status_code == 200
         assert r.json()["state"] == JobState.PROCESSED.value
+
+    def test_job_photo_streamed_for_review(self, http_client):
+        client, svc = http_client
+        original = _png_bytes()
+        (svc.watcher.intake_dir / "photo.png").write_bytes(original)
+        svc.scan_now()
+        job = client.get("/api/mobile-intake/jobs").json()["items"][0]
+        assert job["photo_url"] == f"/api/mobile-intake/jobs/{job['job_id']}/photo"
+        r = client.get(job["photo_url"])
+        assert r.status_code == 200, r.text
+        assert r.headers["content-type"].startswith("image/")
+        assert r.content == original
+
+    def test_job_photo_missing_404(self, http_client):
+        client, _svc = http_client
+        assert client.get("/api/mobile-intake/jobs/nope/photo").status_code == 404
 
     def test_demo_queue_requires_key(self, http_client):
         client, _svc = http_client

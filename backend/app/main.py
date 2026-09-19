@@ -33,6 +33,9 @@ from .api.routers import (
     journeys,
     insights,
     mobile_intake,
+    shelf_snapshots,
+    auth,
+    sms,
 )
 
 setup_logging()
@@ -66,6 +69,17 @@ def create_app() -> FastAPI:
                 )
             except Exception:  # pragma: no cover - defensive
                 logger.exception("Failed to start mobile intake watcher")
+        # M31: start the SMS outbox worker (background thread) when SMS is
+        # enabled. Skipped under pytest so tests drain the queue deterministically
+        # via SmsOutboxService.process_pending / SmsWorker.drain_once().
+        if settings.SMS_ENABLED and "pytest" not in sys.modules:
+            try:
+                from .services.sms.manager import start_sms_worker
+
+                start_sms_worker()
+                logger.info("SMS outbox worker started")
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("Failed to start SMS outbox worker")
         logger.info("Application initialized")
         try:
             yield
@@ -75,6 +89,13 @@ def create_app() -> FastAPI:
                     intake_manager.stop(timeout=5.0)
                 except Exception:  # pragma: no cover - defensive
                     logger.exception("Error stopping mobile intake watcher")
+            # M31: stop the SMS outbox worker cleanly.
+            try:
+                from .services.sms.manager import stop_sms_worker
+
+                stop_sms_worker(timeout=5.0)
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("Error stopping SMS outbox worker")
             # Shut down the Edge runtime (camera workers) cleanly.
             try:
                 from .edge import get_runtime
@@ -99,6 +120,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -112,6 +134,9 @@ def create_app() -> FastAPI:
 
     # M22 system readiness/status (PostgreSQL + migrations + Re-ID + demo).
     app.include_router(system_router, prefix="/api")
+
+    # Authentication (session-cookie, PostgreSQL-backed).
+    app.include_router(auth.router, prefix="/api")
 
     # Business / data layer endpoints (PostgreSQL-backed).
     app.include_router(stores.router, prefix="/api")
@@ -135,6 +160,8 @@ def create_app() -> FastAPI:
     app.include_router(insights.router, prefix="/api")
     app.include_router(mobile_intake.router, prefix="/api")
     app.include_router(edge_router, prefix="/api")
+    app.include_router(shelf_snapshots.router, prefix="/api")
+    app.include_router(sms.router, prefix="/api")
 
     return app
 

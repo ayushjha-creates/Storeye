@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Product
 from app.services.observations.observation_service import ObservationService
+from app.services.product.name_matcher import ProductNameMatcher
 
 from .events import EdgeEvent, EventKind, OCRParsed
 
@@ -48,6 +49,31 @@ def _uuid_or_none(value: Optional[str]) -> Optional[str]:
         return str(value)
     except (ValueError, AttributeError):
         return None
+
+
+def _load_name_matcher(
+    session: Session, store_id: Optional[str]
+) -> Optional[ProductNameMatcher]:
+    """Load the store catalog into a conservative OCR-name matcher.
+
+    Returns None when there is no store context, no products, or the query
+    fails — OCR then simply records raw text + parsed dates without a product.
+    """
+    if store_id is None:
+        return None
+    try:
+        stmt = (
+            select(Product)
+            .where(Product.store_id == UUID(store_id))
+            .order_by(Product.name, Product.sku)
+        )
+        products = list(session.execute(stmt).scalars().all())
+    except Exception:  # pragma: no cover - defensive; never block inference
+        logger.exception("Failed to load product catalog for OCR name matching")
+        return None
+    if not products:
+        return None
+    return ProductNameMatcher.from_products(products)
 
 
 def _load_class_to_product(session: Session, store_id: Optional[str]) -> Dict[str, str]:
@@ -97,6 +123,7 @@ class ObservationWriter:
         camera_id: Optional[str] = None,
         min_gap_seconds: float = 2.0,
         journey_service=None,
+        persist_person_observations: bool = True,
     ) -> None:
         self._service = ObservationService(session)
         self._journey = journey_service
@@ -104,11 +131,19 @@ class ObservationWriter:
         self._store_id = _uuid_or_none(store_id)
         self._camera_id = _uuid_or_none(camera_id)
         self._min_gap = min_gap_seconds
+        # M29 durable-person policy: False -> PERSON observations are never
+        # persisted; all person analytics then live in the hot person-state
+        # cache + the minimal journey aggregates. Product/text/expiry and the
+        # journey events (track_assoc/zone) are unaffected.
+        self._persist_person = persist_person_observations
         # Per-kind last-write timestamps for throttling.
         self._last_write: Dict[str, datetime] = {}
         self._lock = threading.Lock()
         # Lazy explicit class->product mapping for this writer's store.
         self._class_to_product: Optional[Dict[str, str]] = None
+        # Lazy catalog matcher for OCR name resolution.
+        self._name_matcher: Optional[ProductNameMatcher] = None
+        self._name_matcher_loaded = False
 
     def _mapped_product_id(self, class_name: Optional[str]) -> Optional[str]:
         if not class_name:
@@ -116,6 +151,49 @@ class ObservationWriter:
         if self._class_to_product is None:
             self._class_to_product = _load_class_to_product(self._session, self._store_id)
         return self._class_to_product.get(class_name)
+
+    def _match_name_to_product(self, text: Optional[str]):
+        """Conservatively match a detected class/prompt name to the catalog."""
+        if not text:
+            return None
+        if not self._name_matcher_loaded:
+            self._name_matcher = _load_name_matcher(self._session, self._store_id)
+            self._name_matcher_loaded = True
+        matcher = self._name_matcher
+        if matcher is None:
+            return None
+        try:
+            return matcher.match_lines([str(text)])
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Product name matching failed")
+            return None
+
+    def _match_ocr_product(self, parsed: OCRParsed):
+        """Conservatively resolve a printed product name from OCR text.
+
+        Returns a `NameMatch` or None. Never guesses: an unmatched label stays
+        unmatched so the UI can show the raw text as unrecognized.
+        """
+        if not self._name_matcher_loaded:
+            self._name_matcher = _load_name_matcher(self._session, self._store_id)
+            self._name_matcher_loaded = True
+        matcher = self._name_matcher
+        if matcher is None:
+            return None
+        lines = []
+        for item in parsed.text_items or []:
+            text = item.get("text") if isinstance(item, dict) else getattr(item, "text", None)
+            if text:
+                lines.append(str(text))
+        if not lines and parsed.raw_text:
+            lines = str(parsed.raw_text).splitlines()
+        if not lines:
+            return None
+        try:
+            return matcher.match_lines(lines)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("OCR product name matching failed")
+            return None
 
     # ------------------------------------------------------------------
     def _allowed(self, kind: EventKind, now: datetime) -> bool:
@@ -151,8 +229,20 @@ class ObservationWriter:
                 logger.exception("Error closing observation writer session")
 
     # ------------------------------------------------------------------
+    @property
+    def persist_person_observations(self) -> bool:
+        return self._persist_person
+
     def _write_one(self, ev: EdgeEvent, now: datetime) -> bool:
         """Write one event; falls back gracefully if a FK is missing."""
+        # -------------------------------------------------------------------
+        # M29 durable-person policy: when a store opted out of per-frame PERSON
+        # observation rows, skip them entirely. The hot person-state cache and
+        # the journey aggregates keep carrying their analytics.
+        # -------------------------------------------------------------------
+        if ev.kind == EventKind.PERSON and not self._persist_person:
+            return False
+
         # -------------------------------------------------------------------
         # M19 journey events — written through JourneyService, not
         # ObservationService. Returns True even when journey_service is absent
@@ -214,6 +304,9 @@ class ObservationWriter:
             zone = getattr(p, "zone_id", None)
             if zone is not None:
                 details["zone_id"] = zone
+            bbox_norm = getattr(p, "bbox_norm", None)
+            if bbox_norm:
+                details["bbox_norm"] = list(bbox_norm)
             return dict(
                 _method="record_person_observation",
                 **common,
@@ -224,13 +317,27 @@ class ObservationWriter:
             )
         if ev.kind == EventKind.PRODUCT:
             class_name = getattr(ev.payload, "class_name", None)
+            product_id = self._mapped_product_id(class_name)
+            details: dict = {"class_name": class_name}
+            # Open-vocabulary detections are named by their text prompt, so an
+            # exact class->product mapping often misses. Fall back to the same
+            # conservative catalog name matcher used for OCR labels.
+            if product_id is None:
+                match = self._match_name_to_product(class_name)
+                if match is not None:
+                    product_id = _uuid_or_none(match.product_id)
+                    details["recognized_product_name"] = match.product_name
+                    details["label_match_score"] = match.score
+            bbox_norm = getattr(ev.payload, "bbox_norm", None)
+            if bbox_norm:
+                details["bbox_norm"] = list(bbox_norm)
             return dict(
                 _method="record_product_observation",
                 **common,
-                product_id=self._mapped_product_id(class_name),
+                product_id=product_id,
                 confidence=ev.confidence,
                 bbox=ev.payload.bbox_xyxy,
-                details={"class_name": class_name},
+                details=details,
             )
         if ev.kind == EventKind.TEXT:
             return dict(
@@ -240,13 +347,27 @@ class ObservationWriter:
                 confidence=ev.confidence,
                 bbox=ev.payload.bbox_xyxy,
             )
-        # EXPIRY_METADATA
+        # EXPIRY_METADATA — also resolves the printed product name conservatively
+        # against this store's catalog. Unmatched text is still recorded, with
+        # no product attached.
         parsed: OCRParsed = ev.payload
+        match = self._match_ocr_product(parsed)
+        details_extra: dict = {}
+        product_id = None
+        if match is not None:
+            product_id = _uuid_or_none(match.product_id)
+            details_extra["recognized_product_name"] = match.product_name
+            details_extra["label_match_score"] = match.score
+            details_extra["matched_label"] = match.matched_text
+            if match.selling_price is not None:
+                details_extra["catalog_price"] = match.selling_price
         return dict(
             _method="record_expiry_metadata_observation",
             store_id=self._store_id,
             camera_id=camera_id,
             source_observation_id=None,
+            product_id=product_id,
+            details_extra=details_extra or None,
             raw_text=parsed.raw_text,
             confidence=parsed.confidence,
             expiry_date=parsed.expiry.expiry_date if parsed.expiry else None,

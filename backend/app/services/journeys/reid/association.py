@@ -22,6 +22,11 @@ Rules enforced here (false merges are worse than missed matches):
      forgotten; a later re-sighting starts a NEW global session. (F)
   5. Same-camera protections — the same camera/track keeps its global id; the
      same numeric track id on DIFFERENT cameras is a different person. (K)
+  6. Same-camera re-acquisition — a re-created local track on the same camera
+     may reconnect to its prior global id when it is the ONLY person on that
+     camera, the absence is short (`same_camera_reacquisition_*`) and the
+     appearance is a strong match (`same_camera_similarity_threshold`).
+     Concurrent same-camera tracks are still never merged.
 """
 
 from __future__ import annotations
@@ -251,14 +256,20 @@ class GlobalIdentityManager:
         for (sid, gid), rec in self._identities.items():
             if sid != sighting.store_id:
                 continue  # store isolation (E)
-            if rec.last_camera_id == sighting.camera_id:
-                continue  # same-camera different tracks are never merged (K)
-            if rec.last_seen_at + timedelta(seconds=self.config.max_time_gap_seconds) < now:
-                continue  # time gap exceeded (D)
-            if not self._transition_allowed(rec.last_camera_id, sighting.camera_id):
-                continue  # impossible camera transition (C)
             gap = max(0.0, (now - rec.last_seen_at).total_seconds())
             appearance = cosine_similarity(sighting.embedding, rec.embedding)
+            if rec.last_camera_id == sighting.camera_id:
+                # Same-camera re-acquisition (M27). Never merge concurrent
+                # tracks; only reconnect a genuinely absent, lone track.
+                if not self._same_camera_reacquisition_ok(
+                    sighting, rec, now, gap, appearance
+                ):
+                    continue
+            else:
+                if rec.last_seen_at + timedelta(seconds=self.config.max_time_gap_seconds) < now:
+                    continue  # time gap exceeded (D)
+                if not self._transition_allowed(rec.last_camera_id, sighting.camera_id):
+                    continue  # impossible camera transition (C)
             score = combined_score(appearance, gap, self.config)
             if not meets_threshold(score, self.config):
                 continue
@@ -266,6 +277,45 @@ class GlobalIdentityManager:
                 best = (sid, gid)
                 best_score = score
         return best
+
+    def _same_camera_reacquisition_ok(
+        self,
+        sighting: PersonSighting,
+        rec: _IdentityRecord,
+        now: datetime,
+        gap: float,
+        appearance: float,
+    ) -> bool:
+        """Gate a same-camera reconnect (never a concurrent-track merge).
+
+        Returns True only when the candidate identity has been ABSENT from this
+        camera for a short window, no other local track is currently active on
+        that camera, and the appearance match is strong.
+        """
+        if not self.config.same_camera_reacquisition:
+            return False
+        if gap < self.config.same_camera_reacquisition_seconds:
+            return False  # a concurrent track is still refreshing this identity
+        if gap > self.config.same_camera_reacquisition_max_gap_seconds:
+            return False  # genuinely left; start a new session
+        if appearance < self.config.same_camera_similarity_threshold:
+            return False  # no corroborating transition evidence -> demand a strong match
+        if self._has_active_same_camera_identity(sighting, now):
+            return False  # someone else is visible on this camera right now
+        return True
+
+    def _has_active_same_camera_identity(
+        self, sighting: PersonSighting, now: datetime
+    ) -> bool:
+        """True when another track on this camera is currently being refreshed."""
+        window = self.config.same_camera_reacquisition_seconds
+        for (cam, track_id), gid in self._track_map.items():
+            if cam != sighting.camera_id or track_id == sighting.track_id:
+                continue
+            rec = self._identities.get((sighting.store_id, gid))
+            if rec is not None and (now - rec.last_seen_at).total_seconds() <= window:
+                return True
+        return False
 
     def _transition_allowed(self, from_camera: str, to_camera: str) -> bool:
         if from_camera == to_camera:

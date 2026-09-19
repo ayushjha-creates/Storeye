@@ -6,6 +6,19 @@ import { AuthProvider } from './AuthContext'
 import { ProtectedRoute, PublicOnlyRoute } from './ProtectedRoute'
 import { stubFetchRoutes } from '../test/mock'
 
+const USER = {
+  id: 'u1',
+  email: 'ravi@storeye.local',
+  name: 'Ravi',
+  role: 'STAFF',
+  store_id: 's1',
+  is_active: true,
+  last_login_at: null,
+  created_at: '2026-01-01T00:00:00Z',
+  store_name: 'Test Store',
+  demo_store: false,
+}
+
 function ProtectedStub() {
   return <div data-testid="protected-content">PROTECTED AREA</div>
 }
@@ -18,12 +31,10 @@ function HomeStub() {
   return <div data-testid="home-content">HOME</div>
 }
 
-function renderWithAuth(initial: string[], session: unknown) {
-  window.localStorage.clear()
-  if (session) {
-    window.localStorage.setItem('storeye.auth.session', JSON.stringify(session))
-  }
-  stubFetchRoutes({ '/api/health': { status: 'ok' } })
+function renderWithAuth(initial: string[], authenticated: boolean) {
+  stubFetchRoutes({
+    '/api/auth/me': authenticated ? USER : [401, { detail: 'Not authenticated' }],
+  })
   return render(
     <AuthProvider>
       <MemoryRouter initialEntries={initial}>
@@ -58,27 +69,19 @@ afterEach(() => {
 
 describe('route guards', () => {
   it('redirects an anonymous visitor away from a protected route to /login', async () => {
-    renderWithAuth(['/protected'], null)
+    renderWithAuth(['/protected'], false)
     expect(await screen.findByTestId('login-content')).toBeInTheDocument()
     expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument()
   })
 
   it('renders the protected area when a session exists', async () => {
-    renderWithAuth(['/protected'], {
-      userName: 'Ravi',
-      role: 'ASSOCIATE',
-      loginAt: new Date().toISOString(),
-    })
+    renderWithAuth(['/protected'], true)
     expect(await screen.findByTestId('protected-content')).toBeInTheDocument()
     expect(screen.queryByTestId('login-content')).not.toBeInTheDocument()
   })
 
   it('sends an authenticated user away from /login to the dashboard', async () => {
-    renderWithAuth(['/login'], {
-      userName: 'Ravi',
-      role: 'ASSOCIATE',
-      loginAt: new Date().toISOString(),
-    })
+    renderWithAuth(['/login'], true)
     expect(await screen.findByTestId('home-content')).toBeInTheDocument()
   })
 })

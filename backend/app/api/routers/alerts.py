@@ -12,6 +12,9 @@ intelligence results. This router:
 
 The AI -> alert boundary is absolute: no endpoint in this router can modify
 inventory. Inventory adjustment stays an explicit, human-reviewed operation.
+
+Authorization: reads are STAFF+; creating/running/transitioning alerts is
+MANAGER+. All alert data is store-scoped.
 """
 
 from __future__ import annotations
@@ -24,7 +27,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
+from ..authz import effective_store_id, require_same_store, scoped_get
+from ..deps import get_db, require_role
+from ...core.auth import ROLE_MANAGER
+from ...models import Alert, User
 from ...schemas import (
     AlertCreate,
     AlertEvaluateIn,
@@ -41,10 +47,6 @@ from ...services.alerts import (
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
-def _get_or_404(db: Session, alert_id: UUID):
-    return AlertService(db).get_or_404(alert_id)
-
-
 @router.get("", response_model=AlertList)
 def list_alerts(
     store_id: Optional[UUID] = None,
@@ -52,7 +54,7 @@ def list_alerts(
     product_id: Optional[UUID] = None,
     shelf_id: Optional[UUID] = None,
     alert_type: Optional[str] = Query(
-        default=None, description="SHORTAGE|SURPLUS|MISPLACEMENT|EXPIRY|LOW_SHELF_OCCUPANCY|CAMERA_OFFLINE|REVIEW_REQUIRED"
+        default=None, description="SHORTAGE|SURPLUS|MISPLACEMENT|EXPIRY|LOW_SHELF_OCCUPANCY|SHELF_EMPTY|CAMERA_OFFLINE|REVIEW_REQUIRED"
     ),
     severity: Optional[str] = Query(default=None, description="INFO|LOW|MEDIUM|HIGH|CRITICAL"),
     status_filter: Optional[str] = Query(
@@ -67,11 +69,13 @@ def list_alerts(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Paged alert list with filters. Read-only."""
+    sid = effective_store_id(current_user, store_id)
     svc = AlertService(db)
     items, total = svc.query_alerts(
-        store_id=store_id,
+        store_id=sid,
         camera_id=camera_id,
         product_id=product_id,
         shelf_id=shelf_id,
@@ -87,9 +91,14 @@ def list_alerts(
 
 
 @router.post("", response_model=AlertRead, status_code=status.HTTP_201_CREATED)
-def create_alert(payload: AlertCreate, db: Session = Depends(get_db)):
+def create_alert(
+    payload: AlertCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
     """Manually create an alert (also deduplicates against OPEN/ACKNOWLEDGED
     alerts with the same context). Creates/updates alerts only."""
+    require_same_store(current_user, payload.store_id)
     svc = AlertService(db)
     alert, _ = svc.create_alert(
         store_id=payload.store_id,
@@ -110,10 +119,15 @@ def create_alert(payload: AlertCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/evaluate", response_model=AlertEvaluateResult)
-def evaluate_alerts(payload: AlertEvaluateIn, db: Session = Depends(get_db)):
+def evaluate_alerts(
+    payload: AlertEvaluateIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
     """Evaluate EXISTING intelligence, apply the alert rules, deduplicate, and
     return created/updated alerts. Never runs camera inference; never mutates
     inventory/batches/bills/sales."""
+    require_same_store(current_user, payload.store_id)
     result = AlertRuleEngine(db).evaluate(
         store_id=payload.store_id,
         camera_id=payload.camera_id,
@@ -136,17 +150,26 @@ def evaluate_alerts(payload: AlertEvaluateIn, db: Session = Depends(get_db)):
 
 
 @router.get("/{alert_id}", response_model=AlertRead)
-def get_alert(alert_id: UUID, db: Session = Depends(get_db)):
-    return AlertRead.model_validate(_get_or_404(db, alert_id))
+def get_alert(
+    alert_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    return AlertRead.model_validate(scoped_get(db, current_user, Alert, alert_id))
 
 
 @router.patch("/{alert_id}", response_model=AlertRead)
-def update_alert(alert_id: UUID, payload: AlertUpdate, db: Session = Depends(get_db)):
+def update_alert(
+    alert_id: UUID,
+    payload: AlertUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
     """Metadata-only update: title/message/severity/details. Status changes must
     go through the acknowledge/resolve/dismiss endpoints so the lifecycle can
     never be bypassed."""
     svc = AlertService(db)
-    alert = _get_or_404(db, alert_id)
+    alert = scoped_get(db, current_user, Alert, alert_id)
     alert = svc.update_fields(
         alert,
         title=payload.title,
@@ -158,15 +181,33 @@ def update_alert(alert_id: UUID, payload: AlertUpdate, db: Session = Depends(get
 
 
 @router.post("/{alert_id}/acknowledge", response_model=AlertRead)
-def acknowledge_alert(alert_id: UUID, db: Session = Depends(get_db)):
-    return AlertRead.model_validate(AlertService(db).acknowledge(_get_or_404(db, alert_id)))
+def acknowledge_alert(
+    alert_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
+    return AlertRead.model_validate(
+        AlertService(db).acknowledge(scoped_get(db, current_user, Alert, alert_id))
+    )
 
 
 @router.post("/{alert_id}/resolve", response_model=AlertRead)
-def resolve_alert(alert_id: UUID, db: Session = Depends(get_db)):
-    return AlertRead.model_validate(AlertService(db).resolve(_get_or_404(db, alert_id)))
+def resolve_alert(
+    alert_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
+    return AlertRead.model_validate(
+        AlertService(db).resolve(scoped_get(db, current_user, Alert, alert_id))
+    )
 
 
 @router.post("/{alert_id}/dismiss", response_model=AlertRead)
-def dismiss_alert(alert_id: UUID, db: Session = Depends(get_db)):
-    return AlertRead.model_validate(AlertService(db).dismiss(_get_or_404(db, alert_id)))
+def dismiss_alert(
+    alert_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
+    return AlertRead.model_validate(
+        AlertService(db).dismiss(scoped_get(db, current_user, Alert, alert_id))
+    )

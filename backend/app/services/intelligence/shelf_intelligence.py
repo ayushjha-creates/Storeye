@@ -17,14 +17,21 @@ VISIBLE OCCUPANCY (clearly labelled an estimate):
     using the observations associated to the region. Always presented as
     "AI-estimated visible occupancy", never as exact stock. When there is no
     AI data it is "Occupancy unavailable" (None).
+    When observations span enough wall-clock minute-buckets, the MEDIAN of the
+    per-bucket occupancies is used (temporal smoothing) and reported via
+    `occupancy_method="median_60s"`; otherwise the raw value is reported
+    (`occupancy_method="raw"`). Smoothing never invents data.
 
 SHELF STATES:
     UNKNOWN          no product observations for the camera in the window
                      (camera offline / pipeline off / window empty)
-    EMPTY_VISIBLE    AI sees no visible product in this region
-    LOW_VISIBLE      visible occupancy below LOW_OCCUPANCY_FRACTION
+    EMPTY_VISIBLE    AI sees no visible product in this region -> fill ASAP
+    LOW_VISIBLE      visible occupancy at/below LOW_OCCUPANCY_FRACTION (half)
+                     -> "about to get empty", refill soon
     NORMAL_VISIBLE   otherwise
     These are NEVER called "out of stock" — the AI only knows what is visible.
+    `refill_recommended` is True for EMPTY_VISIBLE and LOW_VISIBLE so callers
+    (alerts, UI) do not each re-derive the threshold.
 
 MISPLACEMENT FOUNDATION:
     A detected product is a POSSIBLE_MISPLACEMENT candidate only when the
@@ -39,6 +46,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from statistics import median
 from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
@@ -69,8 +77,16 @@ SHELF_STATE_EMPTY = "EMPTY_VISIBLE"
 SHELF_STATE_LOW = "LOW_VISIBLE"
 SHELF_STATE_NORMAL = "NORMAL_VISIBLE"
 
-# Below this visible-occupancy fraction a populated shelf is labelled LOW.
-LOW_OCCUPANCY_FRACTION = 0.35
+# At/below this visible-occupancy fraction a populated shelf is labelled LOW
+# ("half full or less" -> refill soon). EMPTY_VISIBLE is handled separately.
+LOW_OCCUPANCY_FRACTION = 0.5
+
+# Temporal smoothing (M27 Phase 10-11). Occupancy is computed per time bucket
+# (observations grouped by wall-clock minute) and reduced with the MEDIAN, so a
+# one-off detection spike/crossing does not flip the shelf state. Falls back to
+# the raw whole-window value when there are too few buckets to smooth honestly.
+SHELF_SMOOTHING_BUCKET_SECONDS = 60.0
+SHELF_SMOOTHING_MIN_BUCKETS = 3
 
 
 @dataclass
@@ -118,6 +134,13 @@ class ShelfIntelligenceRow:
     latest_observed_at: Optional[datetime] = None
     mean_confidence: Optional[float] = None
     last_analysis_message: Optional[str] = None
+    # How the visible occupancy was derived: "raw" (whole window) or
+    # "median_60s" (temporal smoothing) + the number of time buckets used.
+    occupancy_method: Optional[str] = None
+    occupancy_samples: Optional[int] = None
+    # True when AI evidence says this shelf should be refilled (empty or half
+    # full or less). Never True for UNKNOWN (no evidence).
+    refill_recommended: bool = False
 
 
 def parse_shelf_regions(camera: Camera) -> List[ShelfRegion]:
@@ -264,12 +287,19 @@ class ShelfIntelligenceService:
     ) -> Dict[str, Tuple[Shelf, Optional[Zone]]]:
         if not codes:
             return {}
+        # Deterministic: duplicate shelf codes resolve to the lowest-id shelf
+        # (ORDER BY without a tie-breaker let the row order vary by plan).
         stmt = (
             select(Shelf, Zone)
             .outerjoin(Zone, Zone.id == Shelf.zone_id)
             .where(Shelf.store_id == store_id, Shelf.code.in_(codes))
+            .order_by(Shelf.code, Shelf.id)
         )
-        return {code: (s, z) for code, s, z in [(s.code, s, z) for s, z in self.session.execute(stmt)]}
+        result: Dict[str, Tuple[Shelf, Optional[Zone]]] = {}
+        for shelf, zone in self.session.execute(stmt):
+            if shelf.code not in result:
+                result[shelf.code] = (shelf, zone)
+        return result
 
     def _shelf_expectations(self, store_id: UUID) -> Dict[UUID, set]:
         """Active planogram shelf_id -> {expected product ids}. Empty for
@@ -350,21 +380,20 @@ class ShelfIntelligenceService:
             row.last_analysis_message = "No AI data in window (camera offline or pipeline off)."
             return row
 
-        # Occupancy estimate (clearly labelled as AI-estimated).
-        occupied = sum(
-            rect_intersection_area(list(o.bbox), region.bbox)
-            for o in associated
-            if isinstance(o.bbox, (list, tuple))
-        )
-        row.estimated_visible_occupancy = round(
-            min(1.0, occupied / rect_area(region.bbox)), 4
-        )
+        # Occupancy estimate (clearly labelled as AI-estimated), temporally
+        # smoothed with a median across wall-clock buckets where possible.
+        occupancy, method, samples = self._smoothed_occupancy(associated, region.bbox)
+        row.estimated_visible_occupancy = round(occupancy, 4)
         row.occupied_pct = round(row.estimated_visible_occupancy * 100, 1)
+        row.occupancy_method = method
+        row.occupancy_samples = samples
 
         if not associated:
             row.detection_status = SHELF_STATE_EMPTY
+            row.refill_recommended = True
             row.last_analysis_message = (
-                "AI sees no visible product in this region (could be hidden/behind stock)."
+                "AI sees no visible product in this region "
+                "(could be hidden/behind stock) — refill as soon as possible."
             )
             return row
 
@@ -399,16 +428,55 @@ class ShelfIntelligenceService:
                 )
             )
 
-        row.detection_status = (
-            SHELF_STATE_LOW
-            if row.estimated_visible_occupancy < LOW_OCCUPANCY_FRACTION
-            else SHELF_STATE_NORMAL
-        )
+        if row.estimated_visible_occupancy <= LOW_OCCUPANCY_FRACTION:
+            row.detection_status = SHELF_STATE_LOW
+            row.refill_recommended = True
+        else:
+            row.detection_status = SHELF_STATE_NORMAL
         row.last_analysis_message = (
             "AI-estimated visible occupancy from associated product detections "
             "(informational; not stock)."
         )
         return row
+
+    @staticmethod
+    def _smoothed_occupancy(
+        observations: List[Observation], region_bbox: List[float]
+    ) -> Tuple[float, str, int]:
+        """Return (occupancy, method, samples).
+
+        Raw occupancy = Σ intersection-area / region-area over the window.
+        When observations span >= SHELF_SMOOTHING_MIN_BUCKETS wall-clock
+        minute-buckets, return the MEDIAN of the per-bucket occupancies instead
+        (robust to a single spike). Otherwise fall back to raw — never invent
+        smoothing from too little data.
+        """
+        area = rect_area(region_bbox)
+        if area <= 0:
+            return 0.0, "raw", 0
+
+        def _bucket_occupancy(obs_group: List[Observation]) -> float:
+            occupied = sum(
+                rect_intersection_area(list(o.bbox), region_bbox)
+                for o in obs_group
+                if isinstance(o.bbox, (list, tuple))
+            )
+            return min(1.0, occupied / area)
+
+        buckets: Dict[int, List[Observation]] = {}
+        untimed: List[Observation] = []
+        for o in observations:
+            if o.observed_at is None:
+                untimed.append(o)
+                continue
+            key = int(o.observed_at.timestamp() // SHELF_SMOOTHING_BUCKET_SECONDS)
+            buckets.setdefault(key, []).append(o)
+
+        if len(buckets) >= SHELF_SMOOTHING_MIN_BUCKETS:
+            per_bucket = [_bucket_occupancy(group) for group in buckets.values()]
+            return float(median(per_bucket)), "median_60s", len(per_bucket)
+
+        return _bucket_occupancy(observations), "raw", len(buckets)
 
     @staticmethod
     def _in_region(obs: Observation, region: List[float]) -> bool:

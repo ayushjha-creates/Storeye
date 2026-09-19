@@ -181,7 +181,7 @@ export function ProductIntelligencePage() {
             <Stat label="AI visible qty" value={stats.visible} hint="All cameras, 24h" />
             <Stat label="Possible shortages" value={stats.shortages} hint="Fewer visible than recorded" tone={stats.shortages ? 'danger' : 'default'} />
             <Stat label="Possible surpluses" value={stats.surpluses} hint="More visible than recorded" tone={stats.surpluses ? 'warning' : 'default'} />
-            <Stat label="Unmapped classes" value={stats.unmapped} hint="Assign to a product" tone="brand" />
+            <Stat label="Product candidates" value={stats.unmapped} hint="Unknown products to map" tone="brand" />
           </div>
 
           <Card
@@ -228,7 +228,7 @@ export function ProductIntelligencePage() {
                               <span className="ml-1 text-gray-400">({r.sku})</span>
                             </>
                           ) : (
-                            <Badge tone="purple">Unmapped AI class</Badge>
+                            <Badge tone="purple">Unknown product — map to catalog</Badge>
                           )}
                         </td>
                         <td>{r.camera_name ?? '—'}</td>

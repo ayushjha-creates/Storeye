@@ -5,7 +5,7 @@
 
 import { AlertSeverityBadge } from './AlertSeverityBadge'
 import { AlertStatusBadge } from './AlertStatusBadge'
-import { ALERT_TYPE_LABEL } from '../../lib/api/alerts'
+import { alertTypeLabel } from '../../lib/shop'
 import type { Alert } from '../../lib/api/types'
 
 function formatTime(iso: string | null): string {
@@ -42,7 +42,7 @@ export function AlertCard({
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-brand-700">
-            {ALERT_TYPE_LABEL[alert.alert_type] ?? alert.alert_type}
+            {alertTypeLabel(alert.alert_type)}
           </span>
           <AlertSeverityBadge severity={alert.severity} />
           <AlertStatusBadge status={alert.status} />

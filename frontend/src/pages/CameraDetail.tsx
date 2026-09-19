@@ -6,6 +6,9 @@ import { AnalysisPanel } from '../components/camera/AnalysisPanel'
 import { DetectionStats } from '../components/camera/DetectionStats'
 import { ObservationTimeline } from '../components/camera/ObservationTimeline'
 import { ReIdPanel } from '../components/camera/ReIdPanel'
+import { ProductLabelReads } from '../components/camera/ProductLabelReads'
+import { ShelfMonitor } from '../components/camera/ShelfMonitor'
+import { ShelfRegionEditor } from '../components/camera/ShelfRegionEditor'
 import { Badge } from '../components/ui/Badge'
 import { ErrorMessage } from '../components/ui/ErrorState'
 import { Spinner } from '../components/ui/Spinner'
@@ -16,8 +19,10 @@ import { edgeApi } from '../lib/api/edge'
 import { intelligenceApi } from '../lib/api/intelligence'
 import { alertApi } from '../lib/api/alerts'
 import { storeApi } from '../lib/api/zone'
+import { shelfSnapshotApi } from '../lib/api/shelfSnapshots'
 import { Card } from '../components/ui/Card'
 import { IconCamera } from '../components/ui/icons'
+import type { ShelfOverlayRegion } from '../components/camera/DetectionOverlay'
 import type {
   Alert,
   Camera,
@@ -26,6 +31,7 @@ import type {
   ObservationSummary,
   ProductIntelligenceRow,
   ShelfIntelligenceRow,
+  ShelfSnapshotRow,
   StreamKind,
 } from '../lib/api/types'
 
@@ -38,6 +44,13 @@ import type {
 //   RAW — the raw configured feed (config.streamUrl) when present.
 // The toggle only appears when a raw feed is configured, and both sources
 // come from the local node. No fake/fill-in statistics are ever shown.
+//
+// While the camera is streaming, the page polls the lightweight live data
+// (observations + summary + edge status) so freshly-detected observations from
+// the Edge Runtime appear without a manual reload. The MJPEG stream is already
+// live; before this the counts/FPS were a one-shot snapshot and looked frozen.
+
+const LIVE_REFRESH_MS = 2000
 
 export function CameraDetailPage() {
   const { cameraId } = useParams<{ cameraId: string }>()
@@ -48,16 +61,21 @@ export function CameraDetailPage() {
   const [summary, setSummary] = useState<ObservationSummary | null>(null)
   const [productIntel, setProductIntel] = useState<ProductIntelligenceRow[]>([])
   const [shelfIntel, setShelfIntel] = useState<ShelfIntelligenceRow[]>([])
+  const [shelfSnapshots, setShelfSnapshots] = useState<ShelfSnapshotRow[]>([])
   const [cameraAlerts, setCameraAlerts] = useState<Alert[]>([])
   const [streamMode, setStreamMode] = useState<'ai' | 'raw'>('ai')
   const modeTouched = useRef(false)
+  const storeIdRef = useRef<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [loading, setLoading] = useState(true)
+  // M30: bumped on every live poll so the shelf monitor re-reads snapshots.
+  const [shelfRefresh, setShelfRefresh] = useState(0)
 
-  const refreshEdge = useCallback(async (cam: Camera): Promise<EdgeCameraStatus | null> => {
+  const refreshEdge = useCallback(async (): Promise<EdgeCameraStatus | null> => {
+    if (!cameraId) return null
     try {
-      const s = await edgeApi.camera(cam.id)
+      const s = await edgeApi.camera(cameraId)
       setEdge(s)
       return s
     } catch {
@@ -65,7 +83,7 @@ export function CameraDetailPage() {
       setEdge(null)
       return null
     }
-  }, [])
+  }, [cameraId])
 
   const load = useCallback(async () => {
     if (!cameraId) return
@@ -79,7 +97,7 @@ export function CameraDetailPage() {
         observationApi.list({ camera_id: cameraId, limit: 200 }),
         reconciliationApi.list(),
         observationApi.summary({ camera_id: cameraId, hours: 24 }).catch(() => null),
-        refreshEdge(cam),
+        refreshEdge(),
       ])
       setObservations(obsRes.items)
       setSummary(summaryRes)
@@ -93,13 +111,16 @@ export function CameraDetailPage() {
       } catch {
         sid = null
       }
+      storeIdRef.current = sid
       if (sid) {
-        const [pRes, sRes] = await Promise.all([
+        const [pRes, sRes, snapRes] = await Promise.all([
           intelligenceApi.products({ store_id: sid, camera_id: cameraId }),
           intelligenceApi.shelves({ store_id: sid, camera_id: cameraId }),
+          shelfSnapshotApi.summary({ store_id: sid, camera_id: cameraId }).catch(() => null),
         ])
         setProductIntel(pRes.items)
         setShelfIntel(sRes.items)
+        if (snapRes?.items) setShelfSnapshots(snapRes.items)
       }
 
       // M16: alerts tied to this camera (best effort).
@@ -127,6 +148,36 @@ export function CameraDetailPage() {
     load()
   }, [load])
 
+  // Lightweight live refresh: only the fast-moving data (observations, summary,
+  // edge status). The heavier intelligence/reconciliation/alert reads stay on
+  // the initial full load. Best-effort — a transient failure must not blank the
+  // page or surface an error banner.
+  const refreshLive = useCallback(async () => {
+    if (!cameraId) return
+    const [obsRes, summaryRes] = await Promise.all([
+      observationApi.list({ camera_id: cameraId, limit: 200 }).catch(() => null),
+      observationApi.summary({ camera_id: cameraId, hours: 24 }).catch(() => null),
+    ])
+    if (obsRes) setObservations(obsRes.items)
+    if (summaryRes) setSummary(summaryRes)
+    await refreshEdge()
+    setShelfRefresh((n) => n + 1)
+    if (storeIdRef.current) {
+      shelfSnapshotApi
+        .summary({ store_id: storeIdRef.current, camera_id: cameraId })
+        .then((res) => {
+          if (res?.items) setShelfSnapshots(res.items)
+        })
+        .catch(() => {})
+    }
+  }, [cameraId, refreshEdge])
+
+  useEffect(() => {
+    if (loading) return
+    const id = window.setInterval(refreshLive, LIVE_REFRESH_MS)
+    return () => window.clearInterval(id)
+  }, [loading, refreshLive])
+
   // Keep the default stream mode sensible as camera/edge state lands, but never
   // override an explicit user choice.
   useEffect(() => {
@@ -145,14 +196,40 @@ export function CameraDetailPage() {
     } finally {
       setBusy(false)
     }
-    await refreshEdge(camera)
-  }, [camera, edge, refreshEdge])
+    // Reflect the new run state (and any observations) immediately; the poller
+    // takes over from here.
+    await refreshLive()
+  }, [camera, edge, refreshLive])
 
   if (loading) return <Spinner label="Loading camera…" />
   if (error && !camera) return <ErrorMessage error={error} onRetry={load} />
   if (!camera) return null
 
   const edgeRunning = Boolean(edge?.running)
+  // Prefer the backend's canonical health enum; fall back only for old payloads.
+  const health =
+    edge?.health ??
+    (edge ? (edge.running ? (edge.connection_ok ? 'RUNNING' : 'STARTING') : 'STOPPED') : null)
+  const healthLabel =
+    health === 'RUNNING'
+      ? 'AI RUNNING'
+      : health === 'DEGRADED'
+        ? 'AI DEGRADED'
+        : health === 'STARTING'
+          ? 'AI CONNECTING'
+          : health === 'ERROR'
+            ? 'AI ERROR'
+            : camera.is_active
+              ? 'AI READY'
+              : 'STOPPED'
+  const healthTone: 'green' | 'amber' | 'red' | 'gray' =
+    health === 'RUNNING'
+      ? 'green'
+      : health === 'DEGRADED' || health === 'STARTING'
+        ? 'amber'
+        : health === 'ERROR'
+          ? 'red'
+          : 'gray'
   const rawUrl = (camera.config?.streamUrl as string | undefined) ?? null
   const useAi = streamMode === 'ai'
   const streamUrl = useAi ? (edgeRunning ? edgeApi.streamUrl(camera.id) : null) : rawUrl
@@ -176,9 +253,7 @@ export function CameraDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge tone={edgeRunning ? 'green' : 'gray'}>
-            {edgeRunning ? 'AI RUNNING' : camera.is_active ? 'AI READY' : 'STOPPED'}
-          </Badge>
+          <Badge tone={healthTone}>{healthLabel}</Badge>
           <button
             onClick={toggleRun}
             disabled={busy}
@@ -265,30 +340,25 @@ export function CameraDetailPage() {
             <DetectionOverlay
               observations={observations.slice(0, 24)}
               cameraName={camera.name}
+              shelfRegions={(camera.config?.shelf_regions as ShelfOverlayRegion[] | undefined) ?? []}
+              shelfSnapshots={shelfSnapshots}
             />
           </div>
         </div>
 
-        {/* RIGHT: AI analysis + statistics/performance */}
+        {/* RIGHT: AI analysis + shelf monitoring */}
         <div className="space-y-4">
           <AnalysisPanel
             cameraName={camera.name}
             observations={observations}
             reconciliationSummary={reconSummary}
           />
-          <DetectionStats camera={camera} edge={edge} summary={summary} />
+          <ShelfMonitor camera={camera} refreshKey={shelfRefresh} />
+          <ProductLabelReads observations={observations} />
         </div>
       </div>
 
-      {/* BOTTOM: recent detection timeline */}
-      <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-          Recent detections — {observations.length} in view
-        </p>
-        <ObservationTimeline observations={observations} onRefresh={load} />
-      </div>
-
-      {/* M15: per-camera product + shelf intelligence */}
+      {/* M15: per-camera product + shelf intelligence & alerts */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card
           title="Alerts (this camera)"
@@ -319,41 +389,6 @@ export function CameraDetailPage() {
                     tone={a.severity === 'CRITICAL' || a.severity === 'HIGH' ? 'red' : a.severity === 'MEDIUM' ? 'amber' : 'blue'}
                   >
                     {a.severity}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card
-          title="Product Intelligence (this camera)"
-          subtitle="AI-visible quantity vs recorded inventory — informational only"
-        >
-          {productIntel.length === 0 ? (
-            <p className="text-sm text-gray-400">
-              No mapped product observations for this camera in the window.
-            </p>
-          ) : (
-            <ul className="divide-y divide-gray-100">
-              {productIntel.slice(0, 10).map((r) => (
-                <li key={`${r.ai_class}-${r.camera_id}`} className="flex items-center justify-between py-2">
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">
-                      {r.ai_class}
-                      {r.mapped && r.product_name ? (
-                        <span className="text-gray-500"> → {r.product_name}</span>
-                      ) : (
-                        <Badge tone="purple" >Unmapped</Badge>
-                      )}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      {r.database_quantity != null ? `DB ${r.database_quantity}` : 'no inventory'} ·{' '}
-                      {r.comparison_status}
-                    </p>
-                  </div>
-                  <Badge tone={r.difference != null && r.difference < 0 ? 'red' : r.difference != null && r.difference > 0 ? 'amber' : 'green'}>
-                    {r.visible_count} visible · {r.difference != null ? `${r.difference > 0 ? '+' : ''}${r.difference}` : '—'}
                   </Badge>
                 </li>
               ))}
@@ -395,27 +430,95 @@ export function CameraDetailPage() {
             </ul>
           )}
         </Card>
+
+        <Card
+          title="Product Intelligence (this camera)"
+          subtitle="AI-visible quantity vs recorded inventory — informational only"
+        >
+          {productIntel.length === 0 ? (
+            <p className="text-sm text-gray-400">
+              No mapped product observations for this camera in the window.
+            </p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {productIntel.slice(0, 10).map((r) => (
+                <li key={`${r.ai_class}-${r.camera_id}`} className="flex items-center justify-between py-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">
+                      {r.ai_class}
+                      {r.mapped && r.product_name ? (
+                        <span className="text-gray-500"> → {r.product_name}</span>
+                      ) : (
+                        <Badge tone="purple" >Unmapped</Badge>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {r.database_quantity != null ? `DB ${r.database_quantity}` : 'no inventory'} ·{' '}
+                      {r.comparison_status}
+                    </p>
+                  </div>
+                  <Badge tone={r.difference != null && r.difference < 0 ? 'red' : r.difference != null && r.difference > 0 ? 'amber' : 'green'}>
+                    {r.visible_count} visible · {r.difference != null ? `${r.difference > 0 ? '+' : ''}${r.difference}` : '—'}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        {/* M17: batch metadata is read close-up, not from continuous cameras */}
+        <Card
+          title="Receive Stock"
+          subtitle="Continuous cameras do not read printed expiry / batch / MRP at distance. Use a close-up package photo instead."
+          action={
+            <Link to="/app/receive" className="text-xs font-medium text-brand-700 hover:underline">
+              Receive new stock →
+            </Link>
+          }
+        >
+          <p className="text-sm text-gray-600">
+            Point a phone at the pack: the local barcode + OCR reads the product,
+            batch, MFG, EXP and MRP. You review and confirm the values before any
+            stock is moved — nothing is committed automatically.
+          </p>
+        </Card>
       </div>
 
-      {/* M17: batch metadata is read close-up, not from continuous cameras */}
-      <Card
-        title="Smart Batch Receiving"
-        subtitle="Continuous cameras do not read printed expiry / batch / MRP at distance. Use a close-up package photo instead."
-        action={
-          <Link to="/app/inventory/receive" className="text-xs font-medium text-brand-700 hover:underline">
-            Receive new stock →
-          </Link>
-        }
-      >
-        <p className="text-sm text-gray-600">
-          Point a phone at the pack: the local barcode + OCR reads the product,
-          batch, MFG, EXP and MRP. You review and confirm the values before any
-          stock is moved — nothing is committed automatically.
-        </p>
-      </Card>
+      {/* M27: operator-defined shelf regions (no shelf detector exists) */}
+      {camera ? (
+        <ShelfRegionEditor
+          key={camera.updated_at}
+          camera={camera}
+          latestProductBox={
+            observations.find((o) => o.observation_type === 'PRODUCT' && o.bbox)?.bbox ?? null
+          }
+          onSaved={load}
+        />
+      ) : null}
 
-      {/* M19: person Re-ID for this camera (anonymous, cross-camera continuity) */}
-      <ReIdPanel observations={observations} />
+      {/* Technical Diagnostics & Telemetry (expandable so it doesn't clutter the store owner's view) */}
+      <details className="group rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-all">
+        <summary className="flex cursor-pointer items-center justify-between font-semibold text-sm text-gray-700 select-none hover:text-brand-700">
+          <span className="flex items-center gap-2">
+            <span>🔧</span>
+            <span>Advanced Diagnostics & AI Telemetry</span>
+          </span>
+          <span className="text-xs font-normal text-gray-400 group-open:hidden">
+            Click to view FPS, stage timings, raw event feed & person Re-ID
+          </span>
+        </summary>
+        <div className="mt-4 space-y-6 border-t border-gray-100 pt-4">
+          <DetectionStats camera={camera} edge={edge} summary={summary} />
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Recent detections — {observations.length} in view
+            </p>
+            <ObservationTimeline observations={observations} onRefresh={load} />
+          </div>
+          {/* M19: person Re-ID for this camera (anonymous, cross-camera continuity) */}
+          <ReIdPanel observations={observations} />
+        </div>
+      </details>
     </div>
   )
 }

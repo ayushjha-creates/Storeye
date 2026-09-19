@@ -24,6 +24,7 @@ from app.db.base import Base
 from app.main import app
 from app.models import CONF_HIGH, Camera, Store, Zone
 from app.services.journeys import JourneyService
+from tests.conftest import bind_test_user, make_store
 
 pytestmark = pytest.mark.pg
 
@@ -31,6 +32,13 @@ TEST_DB_URL = os.getenv(
     "TEST_DATABASE_URL",
     "postgresql+psycopg2://storeye@localhost:5433/storeye_test",
 )
+
+
+def _new_store(session_factory, name: str):
+    """Create a store in the test DB and authenticate as its OWNER."""
+    store = make_store(session_factory, name)
+    bind_test_user(store.id)
+    return str(store.id)
 
 
 @pytest.fixture(scope="session")
@@ -113,9 +121,8 @@ def _seed_journey(session_factory, store_id, zone_id):
 
 
 def test_journeys_list_summary_detail_and_404(client, session_factory):
-    # Create store
-    r = client.post("/api/stores", json={"name": "Journey Mart"})
-    store_id = r.json()["id"]
+    # Create store + authenticate as its OWNER
+    store_id = _new_store(session_factory, "Journey Mart")
 
     # Create zone
     zr = client.post(
@@ -160,17 +167,27 @@ def test_journeys_list_summary_detail_and_404(client, session_factory):
     # Summary route is stable even with /summary path
     assert client.get(f"/api/journeys/summary?store_id={store_id}").status_code == 200
 
-    # Wrong store => nothing (store-scoped)
-    r2 = client.post("/api/stores", json={"name": "Other Store"})
-    other = r2.json()["id"]
-    empty = client.get(f"/api/journeys?store_id={other}")
-    assert empty.json()["total"] == 0
+    # Daily footfall (deduped sessions per UTC day) — route must not collide
+    # with /{global_person_id}.
+    daily = client.get(f"/api/journeys/daily?store_id={store_id}&days=7")
+    assert daily.status_code == 200
+    dl = daily.json()["items"]
+    assert len(dl) == 7
+    # The seeded journey started today, so today's bucket has >= 1 visitor.
+    assert dl[-1]["visitors"] == 1
+    assert dl[0]["date"] < dl[-1]["date"]
+    # Bad days value rejected.
+    assert client.get(f"/api/journeys/daily?store_id={store_id}&days=61").status_code == 422
+
+    # Wrong store => rejected at the isolation boundary
+    other_store = make_store(session_factory, "Other Store")
+    blocked = client.get(f"/api/journeys?store_id={other_store.id}")
+    assert blocked.status_code == 403
 
 
 def test_zone_analytics_endpoint(client, session_factory):
-    # Create store
-    r = client.post("/api/stores", json={"name": "Zone Mart"})
-    store_id = r.json()["id"]
+    # Create store + authenticate as its OWNER
+    store_id = _new_store(session_factory, "Zone Mart")
 
     # Create zone
     zr = client.post(
@@ -192,10 +209,9 @@ def test_zone_analytics_endpoint(client, session_factory):
     assert a["currently_inside"] == 1  # zone visit left open
 
 
-def test_camera_config_validates_m19_keys(client):
-    # Create store
-    r = client.post("/api/stores", json={"name": "Config Mart"})
-    store_id = r.json()["id"]
+def test_camera_config_validates_m19_keys(client, session_factory):
+    # Create store + authenticate as its OWNER
+    store_id = _new_store(session_factory, "Config Mart")
 
     # Valid camera with M19 config
     cam = {
@@ -233,3 +249,94 @@ def test_camera_config_validates_m19_keys(client):
         },
     )
     assert bad.status_code == 422
+
+
+def test_camera_config_validates_m27_shelf_regions(client, session_factory):
+    store_id = _new_store(session_factory, "Shelf Config Mart")
+
+    # Valid manual shelf regions (M15/M27) are accepted.
+    ok = client.post(
+        "/api/cameras",
+        json={
+            "name": "Shelf Cam",
+            "store_id": store_id,
+            "camera_type": "usb",
+            "config": {
+                "kind": "usb",
+                "shelf_regions": [
+                    {"code": "A1", "label": "Chips", "bbox": [0, 0, 320, 240]}
+                ],
+            },
+        },
+    )
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["config"]["shelf_regions"][0]["code"] == "A1"
+
+    # Degenerate bbox (x2 <= x1) is rejected.
+    bad_bbox = client.post(
+        "/api/cameras",
+        json={
+            "name": "Bad Shelf",
+            "store_id": store_id,
+            "camera_type": "usb",
+            "config": {"shelf_regions": [{"code": "A1", "bbox": [10, 10, 10, 50]}]},
+        },
+    )
+    assert bad_bbox.status_code == 422
+
+    # Missing code is rejected.
+    bad_code = client.post(
+        "/api/cameras",
+        json={
+            "name": "Bad Shelf 2",
+            "store_id": store_id,
+            "camera_type": "usb",
+            "config": {"shelf_regions": [{"bbox": [0, 0, 10, 10]}]},
+        },
+    )
+    assert bad_code.status_code == 422
+
+
+def test_camera_config_validates_m32_product_detector(client, session_factory):
+    """M32: product model + open-vocab prompts are validated (flat/nested)."""
+    store_id = _new_store(session_factory, "Product Config Mart")
+
+    ok = client.post(
+        "/api/cameras",
+        json={
+            "name": "Product Cam",
+            "store_id": store_id,
+            "camera_type": "usb",
+            "config": {
+                "kind": "usb",
+                "pipelines": {
+                    "product_detector": "world",
+                    "product_prompts": ["biscuit packet", "milk carton"],
+                },
+            },
+        },
+    )
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["config"]["pipelines"]["product_detector"] == "world"
+
+    bad_detector = client.post(
+        "/api/cameras",
+        json={
+            "name": "Bad Detector",
+            "store_id": store_id,
+            "camera_type": "usb",
+            "config": {"pipelines": {"product_detector": "bogus"}},
+        },
+    )
+    assert bad_detector.status_code == 422
+
+    bad_prompts = client.post(
+        "/api/cameras",
+        json={
+            "name": "Bad Prompts",
+            "store_id": store_id,
+            "camera_type": "usb",
+            "config": {"pipelines": {"product_prompts": [1, 2, 3]}},
+        },
+    )
+    assert bad_prompts.status_code == 422

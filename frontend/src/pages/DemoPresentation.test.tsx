@@ -93,9 +93,9 @@ describe('DemoPresentationPage', () => {
     const dashboard = await screen.findByRole('link', { name: /open dashboard/i })
     expect(dashboard).toHaveAttribute('href', '/app')
     expect(screen.getByRole('link', { name: /open insights/i })).toHaveAttribute('href', '/app/insights')
-    expect(screen.getByRole('link', { name: /open smart receiving/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /open receive stock/i })).toHaveAttribute(
       'href',
-      '/app/inventory/receive',
+      '/app/receive',
     )
   })
 

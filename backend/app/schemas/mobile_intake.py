@@ -45,6 +45,9 @@ class MobileIntakeJobRead(BaseModel):
     acceptable: Optional[bool] = None
     reason: Optional[str] = None
     candidate: Optional[BatchScanCandidateRead] = None
+    # Relative URL of the original photo (served from disk; images are never
+    # stored in PostgreSQL). None when the job has no on-disk file.
+    photo_url: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -53,6 +56,11 @@ class MobileIntakeJobRead(BaseModel):
         candidate = None
         if data.get("candidate"):
             candidate = BatchScanCandidateRead.model_validate(data["candidate"])
+        photo_url = (
+            f"/api/mobile-intake/jobs/{data['job_id']}/photo"
+            if data.get("stored_path")
+            else None
+        )
         return cls(
             job_id=data["job_id"],
             filename=data["filename"],
@@ -65,6 +73,7 @@ class MobileIntakeJobRead(BaseModel):
             acceptable=data.get("acceptable"),
             reason=data.get("reason"),
             candidate=candidate,
+            photo_url=photo_url,
             created_at=data["created_at"],
             updated_at=data["updated_at"],
         )

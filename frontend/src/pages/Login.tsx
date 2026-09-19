@@ -3,22 +3,50 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { Button } from '../components/ui/Modal'
 import { ErrorMessage } from '../components/ui/ErrorState'
-import { NetworkError } from '../lib/api/client'
+import { ApiError, NetworkError } from '../lib/api/client'
 import { IconActivity, IconBox, IconEye, IconScan, IconWifi } from '../components/ui/icons'
 
 /**
- * Login page.
- *
- * AUTH LIMITATION (see AuthContext.tsx): the backend does not yet implement
- * authentication. This page is a UI foundation — it verifies that the local
- * Edge Hub (FastAPI) is reachable, then records a local session. It does NOT
- * verify credentials and does NOT provide backend security.
+ * Turn a login failure into a message that names the actual problem, rather
+ * than surfacing a raw HTTP status (e.g. "Not found: Not Found"). The backend
+ * detail is preserved for credential/validation errors.
+ */
+function describeLoginError(err: unknown): unknown {
+  if (err instanceof ApiError) {
+    if (err.status === 403) {
+      return Object.assign(
+        new Error('The authentication request was rejected. Refresh the page and try again.'),
+        { status: 403 },
+      )
+    }
+    if (err.status === 404) {
+      return Object.assign(
+        new Error(
+          'Authentication service endpoint not found. The local backend may be out of date — restart it and try again.',
+        ),
+        { status: 404 },
+      )
+    }
+    if (err.status >= 500) {
+      return Object.assign(
+        new Error('The authentication service hit an error. Please try again.'),
+        { status: err.status },
+      )
+    }
+  }
+  return err
+}
+
+/**
+ * Login page. Credentials are verified by the local FastAPI backend, which
+ * issues an HttpOnly session cookie. There is no public registration — accounts
+ * are provisioned by a store owner.
  */
 export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
@@ -32,13 +60,13 @@ export function LoginPage() {
     setError(null)
     setBusy(true)
     try {
-      await login(username, password)
+      await login(email, password)
       navigate(from, { replace: true })
     } catch (err) {
       setError(
         err instanceof NetworkError
           ? 'Cannot reach the local Storeye Edge Hub. Start the backend (FastAPI on localhost:8000) and retry.'
-          : err,
+          : describeLoginError(err),
       )
     } finally {
       setBusy(false)
@@ -121,22 +149,23 @@ export function LoginPage() {
           <div className="mt-6 rounded-card border border-brand-100 bg-white p-6 shadow-soft">
             <form onSubmit={onSubmit} className="space-y-4">
               <div>
-                <label className="mb-1 block text-sm font-medium text-brand-700" htmlFor="username">
-                  Name
+                <label className="mb-1 block text-sm font-medium text-brand-700" htmlFor="email">
+                  Email
                 </label>
                 <input
-                  id="username"
-                  autoComplete="username"
+                  id="email"
+                  type="email"
+                  autoComplete="email"
                   className="w-full rounded-lg border border-brand-200 bg-white px-3 py-2.5 text-sm text-brand-900 placeholder-brand-300 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-300"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Store Manager"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@storeye.local"
                   required
                 />
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-brand-700" htmlFor="password">
-                  PIN / Password
+                  Password
                 </label>
                 <input
                   id="password"
@@ -145,7 +174,7 @@ export function LoginPage() {
                   className="w-full rounded-lg border border-brand-200 bg-white px-3 py-2.5 text-sm text-brand-900 placeholder-brand-300 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-300"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••"
+                  placeholder="••••••••"
                   required
                 />
               </div>
@@ -153,15 +182,13 @@ export function LoginPage() {
               {error ? <ErrorMessage error={error} compact /> : null}
 
               <Button type="submit" disabled={busy} kind="primary" className="w-full">
-                {busy ? 'Connecting to Edge Hub…' : 'Sign in to Storeye'}
+                {busy ? 'Signing in…' : 'Sign in to Storeye'}
               </Button>
             </form>
 
-            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              <span className="font-medium">Note:</span> authentication middleware
-              is not yet wired into the backend. This sign-in checks that your
-              local Edge Hub (FastAPI) is reachable and records a local session.
-              It does not provide backend security yet.
+            <div className="mt-4 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-700">
+              Your session is protected by a secure, HttpOnly cookie issued by the
+              local Edge Hub. Accounts are created by your store owner.
             </div>
           </div>
         </div>

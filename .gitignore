@@ -28,6 +28,10 @@ data/
 runs/
 models/yolo/*.pt.lock
 
+# M32: CLIP text-encoder weights for YOLO-World are ~338 MB and downloaded on
+# first use by Ultralytics; never commit them.
+backend/weights/
+
 # Environment
 .env
 .env.local

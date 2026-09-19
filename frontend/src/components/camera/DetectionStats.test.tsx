@@ -22,8 +22,13 @@ const EDGE_RUNNING: EdgeCameraStatus = {
   running: true,
   connection_ok: true,
   error: null,
+  health: 'RUNNING',
   enabled_pipelines: { person_detection: true, product_detection: true, ocr: false },
   fps: 7.5,
+  capture_fps: 8.0,
+  inference_fps: 7.5,
+  inference_ms: 42.0,
+  last_frame_age_seconds: 1.2,
   frames_captured: 1000,
   frames_processed: 800,
   frames_dropped: 200,
@@ -34,7 +39,7 @@ const EDGE_RUNNING: EdgeCameraStatus = {
   started_at: '2026-09-06T09:58:00Z',
 }
 
-const EDGE_IDLE: EdgeCameraStatus = { ...EDGE_RUNNING, running: false, fps: 0, frames_captured: 0, frames_processed: 0, frames_dropped: 0, observations_written: 0, uptime_seconds: null }
+const EDGE_IDLE: EdgeCameraStatus = { ...EDGE_RUNNING, running: false, fps: 0, capture_fps: 0, inference_fps: 0, inference_ms: null, last_frame_age_seconds: null, frames_captured: 0, frames_processed: 0, frames_dropped: 0, observations_written: 0, uptime_seconds: null }
 
 const SUMMARY: ObservationSummary = {
   total: 10,
@@ -53,9 +58,12 @@ describe('DetectionStats', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 
-  it('shows Not available for performance counters when no frames flowed', () => {
+  it('shows "Measuring…" rather than a fake 0 FPS when no frames flowed', () => {
     render(<DetectionStats camera={CAMERA} edge={EDGE_IDLE} summary={null} />)
-    expect(screen.getAllByText(/not available/i).length).toBeGreaterThan(1)
+    // FPS/latency are measured, not asserted as zero.
+    expect(screen.getAllByText(/measuring/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/not available/i).length).toBeGreaterThan(0)
+    expect(screen.queryByText('0.0')).not.toBeInTheDocument()
   })
 
   it('renders the real 24h aggregate numbers and the activity chart', () => {
@@ -66,7 +74,9 @@ describe('DetectionStats', () => {
     expect(screen.getByText('80%')).toBeInTheDocument() // avg confidence
     expect(screen.getByText('2')).toBeInTheDocument() // tracked people
     // Live throughput counters instead of fake labels.
-    expect(screen.getByText('7.5')).toBeInTheDocument()
+    expect(screen.getByText('8.0')).toBeInTheDocument() // capture FPS
+    expect(screen.getByText('7.5')).toBeInTheDocument() // inference FPS
+    expect(screen.getByText('42 ms')).toBeInTheDocument() // measured latency
     expect(screen.getByText('20%')).toBeInTheDocument() // drop rate 200/1000
   })
 

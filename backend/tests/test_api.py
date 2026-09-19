@@ -41,6 +41,7 @@ from app.models import (
     Sale,
     Store,
 )
+from tests.conftest import bind_test_user
 
 pytestmark = pytest.mark.pg
 
@@ -102,6 +103,8 @@ def _make_store(db, name="Test Store") -> Store:
     db.add(s)
     db.commit()
     db.refresh(s)
+    # Authenticate subsequent HTTP calls as an OWNER of this store.
+    bind_test_user(s.id)
     return s
 
 
@@ -133,18 +136,16 @@ def test_health_readiness_and_metrics(client):
 # Store CRUD + validation + not-found
 # ===========================================================================
 def test_store_crud(client, db):
-    # create
-    r = client.post("/api/stores", json={"name": "Corner Shop"})
-    assert r.status_code == 201
-    store = r.json()
-    store_id = store["id"]
-    assert store["timezone"] == "Asia/Kolkata"
-    assert UUID(store_id)
+    # A user may read/update/delete only their own store (created + bound here).
+    store = _make_store(db, "Corner Shop")
+    store_id = str(store.id)
+    assert store.timezone == "Asia/Kolkata"
 
-    # list
+    # list returns the caller's own store only
     r = client.get("/api/stores")
     assert r.status_code == 200
     assert r.json()["total"] == 1
+    assert r.json()["items"][0]["id"] == store_id
 
     # get
     r = client.get(f"/api/stores/{store_id}")
@@ -163,14 +164,16 @@ def test_store_crud(client, db):
     assert r.status_code == 404
 
 
-def test_store_validation_and_not_found(client):
+def test_store_validation_and_not_found(client, db):
+    # Bind an OWNER so the request reaches validation (not 401/403).
+    _make_store(db, "Validation Store")
     # empty name -> 422
     r = client.post("/api/stores", json={"name": ""})
     assert r.status_code == 422
     # missing name -> 422
     r = client.post("/api/stores", json={})
     assert r.status_code == 422
-    # not found
+    # not found (a store the caller does not own is indistinguishable from missing)
     r = client.get("/api/stores/00000000-0000-0000-0000-000000000000")
     assert r.status_code == 404
 
@@ -192,12 +195,15 @@ def test_user_crud(client, db):
     assert r.status_code == 200
     r = client.patch(f"/api/users/{user_id}", json={"role": "ASSOCIATE"})
     assert r.status_code == 200
-    assert r.json()["role"] == "ASSOCIATE"
+    # legacy role strings are canonicalized on write (ASSOCIATE -> STAFF)
+    assert r.json()["role"] == "STAFF"
     r = client.delete(f"/api/users/{user_id}")
     assert r.status_code == 204
 
 
-def test_user_store_not_found(client):
+def test_user_store_not_found(client, db):
+    # Provisioning into another store is rejected before any existence probe.
+    _make_store(db, "User Store")
     r = client.post(
         "/api/users",
         json={
@@ -205,7 +211,7 @@ def test_user_store_not_found(client):
             "name": "Ghost",
         },
     )
-    assert r.status_code == 404
+    assert r.status_code == 403
 
 
 # ===========================================================================
@@ -530,6 +536,8 @@ def test_sale_with_unknown_product_returns_404(client, db):
 
 
 def test_sale_with_unknown_store_returns_404(client, db):
+    # A store the caller does not own is rejected at the isolation boundary.
+    _make_store(db, "Sale Store")
     r = client.post(
         "/api/sales",
         json={
@@ -539,7 +547,7 @@ def test_sale_with_unknown_store_returns_404(client, db):
             "items": [],
         },
     )
-    assert r.status_code == 404
+    assert r.status_code == 403
 
 
 def test_inventory_adjust_reduces_quantity(client, db):
@@ -597,7 +605,8 @@ def test_inventory_adjust_insufficient_stock_returns_422(client, db):
 
 # ===========================================================================
 # Notifications
-# ===========================================================================def test_notification_crud(client, db):
+# ===========================================================================
+def test_notification_crud(client, db):
     store = _make_store(db)
     sid = str(store.id)
     r = client.post(
@@ -908,7 +917,8 @@ def test_reconciliation_persists_result_without_mutating_inventory(client, db):
     assert r.status_code == 200
 
 
-def test_reconciliation_store_not_found(client):
+def test_reconciliation_store_not_found(client, db):
+    _make_store(db, "Recon Store")
     r = client.post(
         "/api/reconciliation/run",
         json={
@@ -917,4 +927,4 @@ def test_reconciliation_store_not_found(client):
             "end": "2026-01-02T00:00:00Z",
         },
     )
-    assert r.status_code == 404
+    assert r.status_code == 403

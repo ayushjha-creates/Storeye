@@ -1,11 +1,14 @@
-"""Bills API routes.
+"""Bills API routes (authenticated, store-scoped).
 
 BILLING RULE
 ------------
 Billing is MANUAL. The shopkeeper creates the bill by selecting
 products/quantities. There is NO AI-generated or predicted billing, and no
-purchase inference from camera. Digital delivery (WhatsApp/SMS) is a later
-milestone — here we only persist and expose the bill.
+purchase inference from camera. When SMS receipts are enabled (M31) and the
+bill has a customer with a phone number, a receipt SMS is queued AFTER the
+bill commit — best-effort, never blocking billing.
+
+Reads and writes require any authenticated role (STAFF+).
 """
 
 from __future__ import annotations
@@ -18,29 +21,24 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
-from ...models import Bill, BillItem, Customer, Product, Sale, Store
+from ..authz import effective_store_id, require_same_store, scoped_get
+from ..deps import get_db, require_role
+from ...models import Bill, BillItem, Customer, Product, Sale, Store, User
 from ...schemas import BillCreate, BillList, BillRead, BillUpdate
 
 router = APIRouter(prefix="/bills", tags=["bills"])
 
 
-def _get_bill_or_404(db: Session, bill_id: UUID) -> Bill:
-    bill = db.get(Bill, bill_id)
-    if bill is None:
-        raise HTTPException(status_code=404, detail="Bill not found")
-    return bill
-
-
-def _validate_refs(db: Session, payload: BillCreate) -> None:
+def _validate_refs(db: Session, current_user: User, payload: BillCreate) -> None:
+    require_same_store(current_user, payload.store_id)
     if db.get(Store, payload.store_id) is None:
         raise HTTPException(status_code=404, detail="Store not found")
-    if payload.sale_id is not None and db.get(Sale, payload.sale_id) is None:
+    if payload.sale_id is not None and scoped_get(db, current_user, Sale, payload.sale_id).store_id != payload.store_id:
         raise HTTPException(status_code=404, detail="Sale not found")
-    if payload.customer_id is not None and db.get(Customer, payload.customer_id) is None:
+    if payload.customer_id is not None and scoped_get(db, current_user, Customer, payload.customer_id).store_id != payload.store_id:
         raise HTTPException(status_code=404, detail="Customer not found")
     for item in payload.items:
-        if db.get(Product, item.product_id) is None:
+        if scoped_get(db, current_user, Product, item.product_id).store_id != payload.store_id:
             raise HTTPException(
                 status_code=404,
                 detail=f"Product {item.product_id} not found",
@@ -51,10 +49,10 @@ def _validate_refs(db: Session, payload: BillCreate) -> None:
 def list_bills(
     store_id: Optional[UUID] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
-    stmt = select(Bill)
-    if store_id is not None:
-        stmt = stmt.where(Bill.store_id == store_id)
+    sid = effective_store_id(current_user, store_id)
+    stmt = select(Bill).where(Bill.store_id == sid)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     items = db.scalars(stmt.order_by(Bill.created_at.desc())).all()
     return BillList(
@@ -65,8 +63,12 @@ def list_bills(
 @router.post(
     "", response_model=BillRead, status_code=status.HTTP_201_CREATED
 )
-def create_bill(payload: BillCreate, db: Session = Depends(get_db)):
-    _validate_refs(db, payload)
+def create_bill(
+    payload: BillCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    _validate_refs(db, current_user, payload)
     bill = Bill(
         store_id=payload.store_id,
         bill_number=payload.bill_number,
@@ -90,12 +92,44 @@ def create_bill(payload: BillCreate, db: Session = Depends(get_db)):
     db.add(bill)
     db.commit()
     db.refresh(bill)
+    _maybe_queue_receipt(db, bill)
     return BillRead.model_validate(bill)
 
 
+def _maybe_queue_receipt(db: Session, bill: Bill) -> None:
+    """M31 — auto-queue a receipt SMS for the bill's customer phone number.
+
+    Best-effort and run AFTER the bill commit, so an SMS queue/gateway problem
+    can NEVER roll back or block billing. Bills without a customer phone are
+    skipped; deployments with SMS disabled are skipped; a missing/cross-store
+    customer is skipped defensively (never raises into the response).
+    """
+    from ...core.config import get_settings
+
+    if not get_settings().SMS_ENABLED or bill.customer_id is None:
+        return
+    customer = db.get(Customer, bill.customer_id)
+    if customer is None or customer.store_id != bill.store_id:
+        return
+    from ...services.sms.manager import get_sms_worker
+
+    # Only queue when the process-wide SMS worker is actually enabled+runnable;
+    # otherwise the row would sit QUEUED forever with no drainer.
+    if get_sms_worker() is None:
+        return
+    store = db.get(Store, bill.store_id)
+    from ...services.sms.outbox import SmsOutboxService
+
+    SmsOutboxService(db).enqueue_for_bill(bill, store, customer)
+
+
 @router.get("/{bill_id}", response_model=BillRead)
-def get_bill(bill_id: UUID, db: Session = Depends(get_db)):
-    return BillRead.model_validate(_get_bill_or_404(db, bill_id))
+def get_bill(
+    bill_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    return BillRead.model_validate(scoped_get(db, current_user, Bill, bill_id))
 
 
 @router.patch("/{bill_id}", response_model=BillRead)
@@ -103,10 +137,12 @@ def update_bill(
     bill_id: UUID,
     payload: BillUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
-    bill = _get_bill_or_404(db, bill_id)
+    bill = scoped_get(db, current_user, Bill, bill_id)
     if payload.customer_id is not None:
-        if db.get(Customer, payload.customer_id) is None:
+        customer = scoped_get(db, current_user, Customer, payload.customer_id)
+        if customer.store_id != bill.store_id:
             raise HTTPException(status_code=404, detail="Customer not found")
         bill.customer_id = payload.customer_id
     if payload.delivery_status is not None:
@@ -118,7 +154,11 @@ def update_bill(
 
 
 @router.delete("/{bill_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_bill(bill_id: UUID, db: Session = Depends(get_db)):
-    bill = _get_bill_or_404(db, bill_id)
+def delete_bill(
+    bill_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
+    bill = scoped_get(db, current_user, Bill, bill_id)
     db.delete(bill)
     db.commit()

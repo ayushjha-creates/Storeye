@@ -19,6 +19,7 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -66,6 +67,9 @@ class FakeRegistry:
         return FakePersonTracker()
 
     def get_product_detector(self):
+        return FakeProductDetector()
+
+    def new_product_detector(self, **_kwargs):
         return FakeProductDetector()
 
     def get_ocr(self):
@@ -146,6 +150,25 @@ def test_pipeline_person_and_product_events(tmp_path):
     # Anonymous, no business mutation: events only.
     for e in events:
         assert e.camera_id == "c1"
+
+
+def test_pipeline_events_carry_normalized_bbox(tmp_path):
+    """M32: every person/product event carries a frame-size-independent box so
+    the frontend overlay renders real (pixel) camera detections correctly."""
+    pipeline = make_pipeline(person_detection=True, product_detection=True, ocr=False)
+    img = np.zeros((48, 64, 3), dtype=np.uint8)
+    events, _ = pipeline.process(frame_for(img, 0))
+    people = [e for e in events if e.kind == EventKind.PERSON]
+    products = [e for e in events if e.kind == EventKind.PRODUCT]
+    assert people and products
+    # Fake person box is [10, 10, 60, 120] in a 64x48 frame (y2 clamps to 1.0).
+    assert people[0].payload.bbox_norm == pytest.approx(
+        [10 / 64, 10 / 48, 60 / 64, 1.0]
+    )
+    # Fake product box is [5, 5, 40, 70] (y2 clamps to 1.0).
+    assert products[0].payload.bbox_norm == pytest.approx(
+        [5 / 64, 5 / 48, 40 / 64, 1.0]
+    )
 
 
 def test_pipeline_confidence_threshold_filters(tmp_path):
@@ -278,6 +301,40 @@ def test_writer_throttling_respects_gap():
     assert service.record_person_observation.call_count == 1
 
 
+def test_worker_reuses_writer_across_frames_and_closes_on_stop():
+    """The worker keeps ONE writer across frames (so its per-kind throttle state
+    survives) and closes it only on stop. Recreating it every frame reset the
+    throttle and flooded the observations table."""
+    from app.edge.events import person_event
+
+    cfg = CameraConfig(camera_id="c1", kind=CameraKind.VIDEO_FILE, source="x.mp4",
+                       pipelines=PipelineConfig(person_detection=True, product_detection=False))
+    worker = worker_with_fake_writer(cfg, FakeRegistry())
+
+    writer = CountingWriter()
+    writer.closed = False  # type: ignore[attr-defined]
+
+    def _close():
+        writer.closed = True  # type: ignore[attr-defined]
+
+    writer.close = _close  # type: ignore[attr-defined]
+    worker._writer = writer
+    worker._writer_owned = True
+
+    ev = person_event(camera_id="c1", frame_number=0, timestamp=datetime.now(timezone.utc),
+                      track_id=1, confidence=0.9, bbox_xyxy=[0, 0, 1, 1])
+    worker._write_events([ev])
+    worker._write_events([ev])
+
+    assert worker._writer is writer  # same instance retained between frames
+    assert writer.written == 2
+    assert writer.closed is False
+
+    worker.stop()
+    assert writer.closed is True
+    assert worker._writer is None
+
+
 def test_writer_fk_fallback_does_not_crash():
     """A valid-UUID camera id with no matching DB row falls back to camera_id=None."""
     from unittest.mock import MagicMock
@@ -300,9 +357,309 @@ def test_writer_fk_fallback_does_not_crash():
 
 
 # ---------------------------------------------------------------------------
+# M27 Phase 17-21: explicit health enum, capacity guardrail, supervisor
+# ---------------------------------------------------------------------------
+def test_camera_health_states():
+    from app.edge.health import (
+        camera_health,
+        HEALTH_RUNNING,
+        HEALTH_STARTING,
+        HEALTH_ERROR,
+        HEALTH_STOPPED,
+        HEALTH_DISABLED,
+    )
+
+    assert camera_health(running=True, connection_ok=True, error=None) == HEALTH_RUNNING
+    assert camera_health(running=True, connection_ok=False, error=None) == HEALTH_STARTING
+    assert camera_health(running=True, connection_ok=True, error="eof") == HEALTH_ERROR
+    assert camera_health(running=False, connection_ok=False, error=None) == HEALTH_STOPPED
+    assert (
+        camera_health(running=False, connection_ok=False, error=None, active=False)
+        == HEALTH_DISABLED
+    )
+
+
+def test_camera_health_degraded_and_exhaustive_states():
+    from app.edge.health import (
+        ALL_HEALTH_STATES,
+        camera_health,
+        HEALTH_DEGRADED,
+        HEALTH_RUNNING,
+    )
+
+    # Stalled source while running/connected is DEGRADED, not RUNNING.
+    assert (
+        camera_health(running=True, connection_ok=True, error=None, stalled=True)
+        == HEALTH_DEGRADED
+    )
+    # A recorded error always wins over staleness.
+    assert camera_health(running=True, connection_ok=True, error="eof", stalled=True) == "ERROR"
+    assert (
+        camera_health(running=True, connection_ok=True, error=None, stalled=False)
+        == HEALTH_RUNNING
+    )
+    # Enum is exhaustive and stable (frontend relies on exactly these values).
+    assert set(ALL_HEALTH_STATES) == {
+        "RUNNING",
+        "DEGRADED",
+        "STARTING",
+        "ERROR",
+        "STOPPED",
+        "DISABLED",
+    }
+
+
+def test_worker_status_reports_health(tmp_path):
+    cfg = CameraConfig(
+        camera_id="h1",
+        kind=CameraKind.VIDEO_FILE,
+        source=make_video(os.path.join(str(tmp_path), "h.mp4"), frames=2, fps=5),
+        pipelines=PipelineConfig(person_detection=False, product_detection=False, ocr=False),
+    )
+    worker = worker_with_fake_writer(cfg, FakeRegistry())
+    assert worker.status()["health"] == "STOPPED"
+    worker.start()
+    try:
+        assert worker.status()["health"] == "RUNNING"
+    finally:
+        worker.stop()
+
+
+def test_runtime_capacity_guardrail(tmp_path):
+    from app.edge.runtime import CameraCapacityError
+
+    vids = [
+        make_video(os.path.join(str(tmp_path), f"cap{i}.mp4"), frames=40, fps=8)
+        for i in range(2)
+    ]
+    rt = EdgeRuntime(registry=FakeRegistry(), max_cameras=1)
+    workers = {}
+    for cid, vid in zip(("c1", "c2"), vids):
+        cfg = CameraConfig(
+            camera_id=cid,
+            kind=CameraKind.VIDEO_FILE,
+            source=vid,
+            pipelines=PipelineConfig(person_detection=True, product_detection=False, ocr=False),
+        )
+        rt.add_camera(cfg)
+        w = worker_with_fake_writer(cfg, FakeRegistry())
+        rt._workers[cid] = w
+        workers[cid] = w
+    rt.start_camera("c1")
+    try:
+        with pytest.raises(CameraCapacityError):
+            rt.start_camera("c2")
+        assert not workers["c2"].running
+    finally:
+        rt.shutdown()
+
+
+def test_runtime_forwards_fps_cap_to_worker(tmp_path):
+    vid = make_video(os.path.join(str(tmp_path), "fps.mp4"), frames=20, fps=8)
+    rt = EdgeRuntime(registry=FakeRegistry())
+    cfg = CameraConfig(
+        camera_id="f1",
+        kind=CameraKind.VIDEO_FILE,
+        source=vid,
+        pipelines=PipelineConfig(person_detection=False, product_detection=False, ocr=False),
+        fps_cap=2.5,
+    )
+    rt.add_camera(cfg)
+    try:
+        assert rt._workers["f1"].fps_cap == 2.5
+    finally:
+        rt.shutdown()
+
+
+def test_runtime_survives_unavailable_ocr_model(tmp_path):
+    class FlakyOCRRegistry(FakeRegistry):
+        def get_ocr(self):
+            raise RuntimeError("OCR weights unavailable")
+
+    vid = make_video(os.path.join(str(tmp_path), "ocrfail.mp4"), frames=20, fps=8)
+    rt = EdgeRuntime(registry=FlakyOCRRegistry())
+    cfg = CameraConfig(
+        camera_id="o1",
+        kind=CameraKind.VIDEO_FILE,
+        source=vid,
+        pipelines=PipelineConfig(person_detection=True, product_detection=False, ocr=True),
+    )
+    try:
+        worker = rt.add_camera(cfg)  # must not raise
+        assert cfg.pipelines.ocr is False  # status reflects reality
+        assert worker.pipeline._ocr is None
+        worker._writer = CountingWriter()
+        rt.start_camera("o1")
+        assert worker.running
+    finally:
+        rt.shutdown()
+
+
+def test_runtime_survives_unavailable_product_model(tmp_path):
+    """M32: a missing YOLO-World/CLIP model disables only the product tap."""
+
+    class FlakyProductRegistry(FakeRegistry):
+        def new_product_detector(self, **_kwargs):
+            raise RuntimeError("YOLO-World weights unavailable")
+
+    vid = make_video(os.path.join(str(tmp_path), "prodfail.mp4"), frames=20, fps=8)
+    rt = EdgeRuntime(registry=FlakyProductRegistry())
+    cfg = CameraConfig(
+        camera_id="p1",
+        kind=CameraKind.VIDEO_FILE,
+        source=vid,
+        pipelines=PipelineConfig(person_detection=True, product_detection=True, ocr=False),
+    )
+    try:
+        worker = rt.add_camera(cfg)  # must not raise
+        assert cfg.pipelines.product_detection is False  # status reflects reality
+        assert worker.pipeline._product is None
+        worker._writer = CountingWriter()
+        rt.start_camera("p1")
+        assert worker.running
+    finally:
+        rt.shutdown()
+
+
+def test_runtime_supports_four_cameras_and_refuses_fifth(tmp_path):
+    from app.edge.runtime import CameraCapacityError
+
+    vid = make_video(os.path.join(str(tmp_path), "four.mp4"), frames=40, fps=8)
+    rt = EdgeRuntime(registry=FakeRegistry(), max_cameras=4)
+    for cid in ("c1", "c2", "c3", "c4", "c5"):
+        cfg = CameraConfig(
+            camera_id=cid,
+            kind=CameraKind.VIDEO_FILE,
+            source=vid,
+            pipelines=PipelineConfig(person_detection=True, product_detection=False, ocr=False),
+        )
+        rt.add_camera(cfg)
+        rt._workers[cid] = worker_with_fake_writer(cfg, FakeRegistry())
+    try:
+        for cid in ("c1", "c2", "c3", "c4"):
+            rt.start_camera(cid)
+        assert sum(1 for w in rt.workers().values() if w.running) == 4
+        with pytest.raises(CameraCapacityError):
+            rt.start_camera("c5")
+    finally:
+        rt.shutdown()
+
+
+def test_stopping_one_camera_does_not_stop_others(tmp_path):
+    vid = make_video(os.path.join(str(tmp_path), "iso.mp4"), frames=60, fps=8)
+    rt = EdgeRuntime(registry=FakeRegistry())
+    for cid in ("a", "b"):
+        cfg = CameraConfig(
+            camera_id=cid,
+            kind=CameraKind.VIDEO_FILE,
+            source=vid,
+            pipelines=PipelineConfig(person_detection=True, product_detection=False, ocr=False),
+        )
+        rt.add_camera(cfg)
+        rt._workers[cid] = worker_with_fake_writer(cfg, FakeRegistry())
+    try:
+        rt.start_camera("a")
+        rt.start_camera("b")
+        rt.stop_camera("a")
+        assert not rt._workers["a"].running
+        assert rt._workers["b"].running
+    finally:
+        rt.shutdown()
+
+
+def test_runtime_reconcile_removes_inactive_cameras(tmp_path):
+    vid = make_video(os.path.join(str(tmp_path), "rec.mp4"), frames=40, fps=8)
+    rt = EdgeRuntime(registry=FakeRegistry())
+    for cid in ("keep", "drop"):
+        cfg = CameraConfig(
+            camera_id=cid,
+            kind=CameraKind.VIDEO_FILE,
+            source=vid,
+            pipelines=PipelineConfig(person_detection=True, product_detection=False, ocr=False),
+        )
+        rt.add_camera(cfg)
+    try:
+        removed = rt.reconcile({"keep"})
+        assert removed == ["drop"]
+        assert rt.has_camera("keep")
+        assert not rt.has_camera("drop")
+    finally:
+        rt.shutdown()
+
+
+# ---------------------------------------------------------------------------
 # Real-AI smoke (marked) - only runs when explicitly selected
 # ---------------------------------------------------------------------------
 @pytest.mark.real_ai
+def test_worker_mirrors_shelf_snapshot_rows_into_cache():
+    """M30: a SHELF_SNAPSHOT event writes a row through the snapshot service
+    AND mirrors it into the runtime's Layer-A shelf cache (PG stays
+    authoritative; the cache is the fast read path)."""
+    from unittest.mock import MagicMock
+
+    from app.edge.events import ShelfSnapshotPayload, shelf_snapshot_event
+    from app.edge.shelf_snapshot_cache import ShelfSnapshotCache
+    from app.models import ShelfSnapshot
+
+    cache = ShelfSnapshotCache(store_id="s1")
+    service = MagicMock()
+    fake_row = ShelfSnapshot(
+        id=uuid4(),
+        store_id="s1",
+        camera_id="c1",
+        shelf_code="S1",
+        shelf_label="Top",
+        region_bbox=[0.0, 0.0, 0.5, 1.0],
+        snapshot_path="c1/20260918/000000000001_S1_full.jpg",
+        crop_path="c1/20260918/000000000001_S1_crop.jpg",
+        fill_percentage=45.0,
+        status="MEDIUM",
+        product_count=3,
+        occluded=False,
+        confidence=0.9,
+        observed_at=datetime.now(timezone.utc),
+    )
+    service.write_snapshot.return_value = fake_row
+
+    cfg = CameraConfig(camera_id="c1", kind=CameraKind.VIDEO_FILE, source="x.mp4",
+                       pipelines=PipelineConfig(product_detection=True))
+    worker = worker_with_fake_writer(cfg, FakeRegistry())
+    worker.store_id = "s1"
+    worker._snapshot_service = service
+    worker.shelf_snapshot_cache = cache
+    worker._make_snapshot_service = MagicMock(return_value=service)
+
+    ev = shelf_snapshot_event(
+        camera_id="c1",
+        frame_number=0,
+        timestamp=datetime.now(timezone.utc),
+        source="edge:file:test.mp4",
+        payload=ShelfSnapshotPayload(
+            shelf_code="S1",
+            shelf_label="Top",
+            region_bbox=[0.0, 0.0, 0.5, 1.0],
+            fill_percentage=45.0,
+            status="MEDIUM",
+            product_count=3,
+            occluded=False,
+            occlusion_note=None,
+            confidence=0.9,
+        ),
+    )
+    frame = frame_for(np.zeros((200, 150, 3), dtype=np.uint8), 0)
+    worker.pipeline.process = MagicMock(return_value=([ev], None))  # type: ignore[method-assign]
+    worker._process_one(frame)
+
+    latest = cache.latest("s1", "c1")
+    assert latest["S1"].shelf_code == "S1"
+    assert latest["S1"].status == "MEDIUM"
+    assert latest["S1"].has_image is True
+    assert cache.get_by_id(str(fake_row.id)).fill_percentage == 45.0
+    assert worker._snapshots_written == 1
+    assert worker.status()["shelf_snapshot_cache"]["size"] == 1
+    worker.stop()
+
+
 def test_real_person_smoke(tmp_path):
     from app.edge.models.registry import ModelRegistry
 

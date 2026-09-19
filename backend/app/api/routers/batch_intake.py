@@ -15,7 +15,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
+from ..authz import effective_store_id, require_same_store
+from ..deps import get_db, require_role
+from ...models import User
 from ...schemas import (
     BatchReceiptRead,
     BatchScanRead,
@@ -59,6 +61,7 @@ def scan_package(
     file: UploadFile = File(...),
     store_id: Optional[UUID] = Form(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Scan a close-up package photo into an editable candidate.
 
@@ -67,8 +70,9 @@ def scan_package(
     (never guessed).
     """
     _check_upload_is_image(file.content_type)
+    sid = effective_store_id(current_user, store_id)
     service = BatchIntakeService(db)
-    scan = service.scan_package(file.file.read(), store_id=store_id)
+    scan = service.scan_package(file.file.read(), store_id=sid)
     return BatchScanRead(
         store_id=scan.store_id,
         acceptable=scan.acceptable,
@@ -78,12 +82,17 @@ def scan_package(
 
 
 @router.post("/confirm", response_model=BatchReceiptRead, status_code=201)
-def confirm_batch(payload: BatchConfirmIn, db: Session = Depends(get_db)):
+def confirm_batch(
+    payload: BatchConfirmIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
     """Commit a shopkeeper-confirmed receipt (batch + inventory + movement).
 
     Atomic: the batch row and the inventory/movement mutation are committed in
     a single transaction through the existing domain services.
     """
+    require_same_store(current_user, payload.store_id)
     service = BatchIntakeService(db)
     batch, movement = service.confirm_receipt(
         store_id=payload.store_id,
@@ -95,6 +104,7 @@ def confirm_batch(payload: BatchConfirmIn, db: Session = Depends(get_db)):
         expiry_date_precision=payload.expiry_date_precision,
         mrp=payload.mrp,
         reference=payload.reference,
+        barcode=payload.barcode,
     )
     return BatchReceiptRead(
         movement=movement,

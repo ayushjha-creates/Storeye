@@ -34,10 +34,13 @@ class ModelRegistry:
         self._lock = threading.Lock()
         self._product: Optional[object] = None
         self._ocr: Optional[object] = None
+        # YOLO-World detectors are prompt-conditioned: keyed by (path, prompts)
+        # so cameras sharing the same vocabulary reuse one model + CLIP encoder.
+        self._world: Dict[tuple, object] = {}
 
     # -- shared, stateless models ----------------------------------------
     def get_product_detector(self, model_path: Optional[str] = None):
-        """Return the shared (cached) shelf/product detector."""
+        """Return the shared (cached) legacy 55-class shelf detector."""
         with self._lock:
             if self._product is None:
                 from .product_detector import ProductDetectorModel
@@ -48,6 +51,44 @@ class ModelRegistry:
                 )
                 logger.info("Loaded shared product detector")
             return self._product
+
+    def new_product_detector(
+        self,
+        *,
+        detector: str = "world",
+        model_path: Optional[str] = None,
+        prompts: Optional[list] = None,
+        conf: Optional[float] = None,
+    ):
+        """Create (or reuse) a product detector.
+
+        The open-vocabulary (YOLO-World) detector owns a prompt set
+        (`set_classes` mutates the model instance), so instances are cached by
+        (model path, prompt tuple): cameras with identical vocabulary share one
+        model + CLIP text encoder and memory stays bounded. Different prompts
+        necessarily use different model instances.
+        """
+        if detector == "shelf":
+            from .product_detector import ProductDetectorModel
+
+            return ProductDetectorModel(
+                model_path=model_path
+                or str(default_model_path("models/shelf/shelf_model.pt")),
+                conf=conf,
+            )
+        from .product_detector import WorldProductDetectorModel
+
+        path = model_path or str(default_model_path("models/shelf/yolov8s-worldv2.pt"))
+        key = (path, tuple(prompts or []))
+        with self._lock:
+            existing = self._world.get(key)
+            if existing is not None:
+                return existing
+            model = WorldProductDetectorModel(
+                model_path=path, prompts=prompts or [], conf=conf
+            )
+            self._world[key] = model
+            return model
 
     def get_ocr(self, lang: str = "en"):
         """Return the shared (cached) OCR model."""
@@ -72,6 +113,8 @@ class ModelRegistry:
         names = []
         if self._product is not None:
             names.append("product/shelf")
+        if self._world:
+            names.append("product/world")
         if self._ocr is not None:
             names.append("ocr")
         return names

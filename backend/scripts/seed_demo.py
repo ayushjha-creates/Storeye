@@ -99,12 +99,18 @@ from app.models import (
     Zone,
     ZoneVisit,
 )
+from app.core.auth import hash_password, verify_password
 from app.services.alerts import AlertService
 from app.services.insights import InsightEngine
 from app.services.inventory import BatchService, InventoryService
 from app.services.journeys import JourneyService
 
 DEMO_STORE_NAME = "Storeye Demo Mart"
+
+# Seeded demo login. This is a well-known demo credential, intentionally
+# documented (never a production secret).
+DEMO_USER_EMAIL = "demo@storeye.local"
+DEMO_USER_PASSWORD = "StoreyeDemo@123"
 
 
 def fixed(slug: str) -> uuid.UUID:
@@ -123,6 +129,13 @@ def _d(y: int, m: int, d: int):
     import datetime as _dt
 
     return _dt.date(y, m, d)
+
+
+def _rel_d(days: int):
+    """Local date helper relative to today so demo expiry dates stay fresh and actionable."""
+    import datetime as _dt
+
+    return _dt.date.today() + _dt.timedelta(days=days)
 
 
 # ---------------------------------------------------------------------------
@@ -168,16 +181,46 @@ INVENTORY: Dict[str, Tuple[int, int, int]] = {
 # sku -> [(batch_number, expiry date, quantity)] — batch-scoped stock.
 BATCHES: Dict[str, List[Tuple[str, "datetime.date", int]]] = {
     "AMUL-MILK": [
-        ("AMUL-1", _d(2026, 8, 20), 4),  # EXPIRED (demo)
-        ("AMUL-2", _d(2026, 10, 7), 6),  # expiring within 30 days
-        ("AMUL-3", _d(2027, 6, 15), 8),  # healthy
+        ("AMUL-B1", _rel_d(-4), 4),   # EXPIRED 4 days ago (Loss / Return)
+        ("AMUL-B2", _rel_d(4), 6),    # URGENT: 4 days remaining (Clearance 50%)
+        ("AMUL-B3", _rel_d(22), 8),   # NEAR: 22 days remaining (FIFO)
+    ],
+    "MAGGI-2MIN": [
+        ("MAGGI-B1", _rel_d(6), 6),   # URGENT: 6 days remaining (Clearance)
+        ("MAGGI-B2", _rel_d(150), 4), # Healthy fresh
     ],
     "AAS-ATTA": [
-        ("AAS-1", _d(2026, 10, 5), 60),  # expiring within 30 days
+        ("AAS-B1", _rel_d(18), 30),   # NEAR: 18 days remaining (FIFO)
+        ("AAS-B2", _rel_d(90), 30),   # Healthy
+    ],
+    "PARLE-G": [
+        ("PARLE-B1", _rel_d(180), 18), # Healthy fresh
     ],
     "FORT-OIL": [
-        ("FORT-1", _d(2027, 3, 1), 36),
-        ("FORT-2", _d(2027, 9, 1), 12),
+        ("FORT-1", _rel_d(120), 36),
+        ("FORT-2", _rel_d(240), 12),
+    ],
+    "AMUL-BUTTER": [
+        ("BUTTER-B1", _rel_d(14), 6), # NEAR: 14 days remaining
+        ("BUTTER-B2", _rel_d(90), 10),
+    ],
+    "DAIRY-MILK": [
+        ("DM-B1", _rel_d(160), 22),
+    ],
+    "TATA-SALT": [
+        ("SALT-B1", _rel_d(365), 60),
+    ],
+    "FORT-RICE": [
+        ("RICE-B1", _rel_d(200), 50),
+    ],
+    "NESCAFE": [
+        ("NES-B1", _rel_d(270), 14),
+    ],
+    "COKE-750": [
+        ("COKE-B1", _rel_d(75), 60),
+    ],
+    "SURF-MATIC": [
+        ("SURF-B1", _rel_d(540), 30),
     ],
 }
 
@@ -246,8 +289,10 @@ def _goc(session: Session, model, fixed_id: uuid.UUID, exclude: Sequence[str] = 
     `exclude` lists column names that must NOT participate in the lookup
     filter (JSON/JSONB columns cannot be compared with ``=`` in PostgreSQL).
     """
-    filter_kwargs = {k: v for k, v in lookup_kwargs.items() if k not in exclude}
-    obj = session.scalars(select(model).filter_by(**filter_kwargs)).first()
+    obj = session.get(model, fixed_id)
+    if obj is None:
+        filter_kwargs = {k: v for k, v in lookup_kwargs.items() if k not in exclude}
+        obj = session.scalars(select(model).filter_by(**filter_kwargs)).first()
     if obj is None:
         obj = model(id=fixed_id, **lookup_kwargs)
         session.add(obj)
@@ -477,10 +522,29 @@ def seed_with_session(session: Session, now: Optional[datetime] = None) -> Dict[
     store.is_demo = True
     counts["stores"] = 1
 
-    _goc(
-        session, User, fixed("user:manager"),
-        store_id=store.id, name="Rohan Verma", mobile="9811000000", role="Store Manager",
-    )
+    demo_user = session.get(User, fixed("user:manager"))
+    if demo_user is None:
+        demo_user = session.scalars(
+            select(User).where(
+                User.store_id == store.id, User.name == "Rohan Verma"
+            )
+        ).first()
+    if demo_user is None:
+        demo_user = User(
+            id=fixed("user:manager"),
+            store_id=store.id,
+            name="Rohan Verma",
+            mobile="9811000000",
+        )
+        session.add(demo_user)
+    demo_user.role = "OWNER"
+    demo_user.is_active = True
+    demo_user.email = DEMO_USER_EMAIL
+    if not demo_user.password_hash or not verify_password(
+        DEMO_USER_PASSWORD, demo_user.password_hash
+    ):
+        demo_user.password_hash = hash_password(DEMO_USER_PASSWORD)
+    session.flush()
     counts["users"] = 1
 
     customer_a = _goc(

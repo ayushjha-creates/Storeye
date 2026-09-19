@@ -118,6 +118,28 @@ class MobileIntakeService:
             raise IntakeJobNotFound(f"No mobile intake job '{job_id}'.")
         return job.to_dict()
 
+    def photo_path(self, job_id: str) -> Path:
+        """Resolve the on-disk photo for a job (served to the review screen).
+
+        The photo never enters PostgreSQL (M22); it is streamed from the intake
+        root. The resolved path is constrained to the root so a crafted
+        `stored_path` can never read an arbitrary file.
+        """
+        job = self._require(job_id)
+        if not job.stored_path:
+            raise MobileIntakeError(f"Job '{job_id}' has no stored photo.")
+        root = self.root.resolve()
+        candidate = (root / job.stored_path).resolve()
+        if candidate != root and root not in candidate.parents:
+            raise MobileIntakeError(
+                f"Job '{job_id}' photo path escapes the intake root."
+            )
+        if not candidate.is_file():
+            raise MobileIntakeError(
+                f"Photo for job '{job_id}' is no longer on disk."
+            )
+        return candidate
+
     # -- human-driven transitions -------------------------------------------
     def close_job(self, job_id: str) -> dict:
         """Book-keeping only: mark a reviewed candidate as fully processed.

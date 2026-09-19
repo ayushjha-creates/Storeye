@@ -28,6 +28,7 @@ from app.db.base import Base
 from app.edge import set_runtime, EdgeRuntime
 from app.edge.models import FakeOCR, FakePersonTracker, FakeProductDetector
 from app.main import app
+from tests.conftest import bind_test_user
 
 pytestmark = [
     pytest.mark.pg,
@@ -41,6 +42,9 @@ class _FakeRegistry:
         return FakePersonTracker()
 
     def get_product_detector(self):
+        return FakeProductDetector()
+
+    def new_product_detector(self, **_kwargs):
         return FakeProductDetector()
 
     def get_ocr(self):
@@ -120,7 +124,15 @@ def store(db):
     db.add(s)
     db.commit()
     db.refresh(s)
+    # Authenticate HTTP calls in this module as an OWNER of this store.
+    bind_test_user(s.id)
     return s
+
+
+@pytest.fixture(autouse=True)
+def _reset_auth_overrides():
+    yield
+    app.dependency_overrides.clear()
 
 
 def _add_camera(db, store, config):
@@ -242,3 +254,213 @@ def test_edge_observations_persist_without_touching_inventory(client, db, store,
     inv_count = db.query(Inventory).count()
     assert obs_count > 0  # AI observations were persisted
     assert inv_count == 0  # and NOTHING touched inventory
+
+
+def test_config_from_camera_forwards_shelf_regions():
+    """M27: manual shelf regions reach the runtime CameraConfig (no detector)."""
+    from uuid import uuid4
+
+    from app.api.edge_api import _config_from_camera
+    from app.models import Camera
+
+    cam = Camera(name="shelf-cam", store_id=uuid4(), camera_type="usb", is_active=True)
+    cam.config = {
+        "kind": "usb",
+        "shelf_regions": [
+            {"code": "A1", "label": "Chips", "bbox": [0, 0, 320, 240]},
+            {"code": "A2", "bbox": [0, 240, 320, 480]},
+        ],
+    }
+    cfg = _config_from_camera(cam)
+    assert cfg.shelf_regions == [
+        {"code": "A1", "label": "Chips", "bbox": [0, 0, 320, 240]},
+        {"code": "A2", "bbox": [0, 240, 320, 480]},
+    ]
+    # M30 default shelf-occupancy knobs are forwarded from the camera config.
+    assert cfg.pipelines.shelf_snapshot_interval_seconds == 30.0
+    assert cfg.pipelines.product_scan_interval_seconds == 30.0
+
+
+def test_config_from_camera_forwards_m30_pipeline_knobs():
+    """M30: cadence + occupancy thresholds reach the runtime PipelineConfig."""
+    from uuid import uuid4
+
+    from app.api.edge_api import _config_from_camera
+    from app.models import Camera
+
+    cam = Camera(name="m30-cam", store_id=uuid4(), camera_type="usb", is_active=True)
+    cam.config = {
+        "kind": "usb",
+        "pipelines": {
+            "product_scan_interval_seconds": 5.0,
+            "shelf_snapshot_interval_seconds": 7.0,
+            "shelf_fill_empty_fraction": 0.08,
+            "shelf_fill_low_fraction": 0.30,
+            "shelf_fill_medium_fraction": 0.65,
+            "shelf_occlusion_overlap_fraction": 0.25,
+        },
+    }
+    cfg = _config_from_camera(cam)
+    assert cfg.pipelines.product_scan_interval_seconds == 5.0
+    assert cfg.pipelines.shelf_snapshot_interval_seconds == 7.0
+    assert cfg.pipelines.shelf_fill_empty_fraction == 0.08
+    assert cfg.pipelines.shelf_fill_low_fraction == 0.30
+    assert cfg.pipelines.shelf_fill_medium_fraction == 0.65
+    assert cfg.pipelines.shelf_occlusion_overlap_fraction == 0.25
+
+
+def test_config_from_camera_forwards_product_detector_and_prompts():
+    """M32: product model choice + operator prompts reach the runtime."""
+    from uuid import uuid4
+
+    from app.api.edge_api import _config_from_camera
+    from app.models import Camera
+
+    cam = Camera(name="m32-cam", store_id=uuid4(), camera_type="usb", is_active=True)
+    cam.config = {
+        "kind": "usb",
+        "pipelines": {
+            "product_detector": "shelf",
+            "product_prompts": ["Biscuit", "biscuit", "Milk 1L"],
+        },
+    }
+    cfg = _config_from_camera(cam)
+    assert cfg.pipelines.product_detector == "shelf"
+    assert cfg.pipelines.product_prompts == ["Biscuit", "Milk 1L"]
+
+
+def test_config_from_camera_derives_prompts_from_catalog_when_unset():
+    """M32: with no prompts, the vocabulary comes from the store's own catalog."""
+    from uuid import uuid4
+
+    from app.api.edge_api import _config_from_camera
+    from app.models import Camera
+
+    class _Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class _DB:
+        def execute(self, _stmt):
+            return _Result(
+                [
+                    (["Complan"], "Complan", "Complan Junior"),
+                    (None, "Amul", "Amul Milk 1L"),
+                ]
+            )
+
+    cam = Camera(name="m32-cam", store_id=uuid4(), camera_type="usb", is_active=True)
+    cam.config = {"kind": "usb"}
+    cfg = _config_from_camera(cam, _DB())
+    assert cfg.pipelines.product_detector == "world"
+    assert "Complan" in cfg.pipelines.product_prompts
+    assert "Amul Milk 1L" in cfg.pipelines.product_prompts
+
+
+def test_config_from_camera_rejects_unknown_detector_value():
+    from uuid import uuid4
+
+    from app.api.edge_api import _config_from_camera
+    from app.models import Camera
+
+    cam = Camera(name="m32-cam", store_id=uuid4(), camera_type="usb", is_active=True)
+    cam.config = {"kind": "usb", "pipelines": {"product_detector": "bogus"}}
+    assert _config_from_camera(cam).pipelines.product_detector == "world"
+
+
+def test_edge_cameras_report_explicit_health(client, db, store, tmp_path):
+    """M27: the API reports one canonical health state per camera."""
+    from app.models import Camera
+
+    active = _add_camera(db, store, _base_cfg(tmp_path))
+    inactive = Camera(name="off-cam", store_id=store.id, camera_type="usb", is_active=False)
+    inactive.config = {"kind": "usb", "source_index": 0}
+    db.add(inactive)
+    db.commit()
+    db.refresh(inactive)
+
+    r = client.get("/api/edge/cameras")
+    assert r.status_code == 200
+    byid = {c["camera_id"]: c for c in r.json()}
+    assert byid[str(active.id)]["health"] == "STOPPED"
+    assert byid[str(inactive.id)]["health"] == "DISABLED"
+
+
+def test_edge_status_reports_capacity(client, db, store, tmp_path):
+    _add_camera(db, store, _base_cfg(tmp_path))
+    body = client.get("/api/edge/status").json()
+    assert isinstance(body["max_cameras"], int)
+    assert body["max_cameras"] >= 0
+
+
+def test_edge_start_refuses_over_capacity(client, db, store, tmp_path):
+    from app.edge import get_runtime
+
+    rt = get_runtime()
+    rt._max_cameras = 1
+    cam1 = _add_camera(db, store, _base_cfg(tmp_path))
+    cam2 = _add_camera(db, store, _base_cfg(tmp_path))
+
+    assert client.post(f"/api/edge/cameras/{cam1.id}/start").status_code == 200
+    try:
+        r = client.post(f"/api/edge/cameras/{cam2.id}/start")
+        assert r.status_code == 409
+        assert "capacity" in r.json()["detail"].lower()
+    finally:
+        client.post(f"/api/edge/cameras/{cam1.id}/stop")
+
+
+def test_edge_supervisor_removes_deactivated_camera(client, db, store, tmp_path):
+    from app.edge import get_runtime
+
+    cam = _add_camera(db, store, _base_cfg(tmp_path))
+    assert client.post(f"/api/edge/cameras/{cam.id}/start").status_code == 200
+    assert get_runtime().has_camera(str(cam.id))
+
+    cam.is_active = False
+    db.commit()
+
+    r = client.get("/api/edge/cameras")
+    assert r.status_code == 200
+    row = {c["camera_id"]: c for c in r.json()}[str(cam.id)]
+    assert row["health"] == "DISABLED"
+    assert not get_runtime().has_camera(str(cam.id))
+
+
+def test_edge_demo_video_upload(client, db, store, tmp_path):
+    # Synthetic video
+    path = os.path.join(str(tmp_path), "sample_demo.mp4")
+    vw = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), 8, (64, 48))
+    for i in range(16):
+        img = np.zeros((48, 64, 3), dtype=np.uint8)
+        img[:] = (i * 10, 50, 80)
+        vw.write(img)
+    vw.release()
+
+    with open(path, "rb") as f:
+        r = client.post(
+            "/api/edge/demo-video",
+            files={"file": ("sample_demo.mp4", f, "video/mp4")},
+            data={"name": "My CCTV Test", "store_id": str(store.id)},
+        )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["name"] == "My CCTV Test"
+    assert data["running"] is True
+    assert data["camera_id"]
+    client.post(f"/api/edge/cameras/{data['camera_id']}/stop")
+
+
+def test_edge_demo_sample_people(client, db, store):
+    r = client.post(
+        "/api/edge/demo-sample",
+        data={"sample_key": "people", "store_id": str(store.id)},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "Customer Flow" in data["name"]
+    assert data["running"] is True
+    client.post(f"/api/edge/cameras/{data['camera_id']}/stop")

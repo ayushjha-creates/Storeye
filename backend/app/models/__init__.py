@@ -7,6 +7,7 @@ build the full schema.
 
 from .store import Store
 from .user import User
+from .auth_session import AuthSession
 from .camera import Camera
 from .zone import Zone
 from .shelf import Shelf
@@ -18,6 +19,15 @@ from .planogram import Planogram, PlanogramItem
 from .customer import Customer
 from .sale import Sale, SaleItem
 from .bill import Bill, BillItem
+from .sms_message import (
+    SmsMessage,
+    MSG_QUEUED,
+    MSG_SENDING,
+    MSG_SENT,
+    MSG_FAILED,
+    VALID_MESSAGE_STATUSES,
+    DEFAULT_SMS_PROVIDER,
+)
 from .notification import Notification
 from .alert import (
     Alert,
@@ -26,6 +36,7 @@ from .alert import (
     ALERT_MISPLACEMENT,
     ALERT_EXPIRY,
     ALERT_LOW_SHELF_OCCUPANCY,
+    ALERT_SHELF_EMPTY,
     ALERT_CAMERA_OFFLINE,
     ALERT_REVIEW_REQUIRED,
     VALID_ALERT_TYPES,
@@ -49,6 +60,14 @@ from .observation import (
     OBS_TEXT,
     OBS_EXPIRY_METADATA,
     VALID_OBSERVATION_TYPES,
+)
+from .shelf_snapshot import (
+    ShelfSnapshot,
+    SNAPSHOT_EMPTY,
+    SNAPSHOT_LOW,
+    SNAPSHOT_MEDIUM,
+    SNAPSHOT_FULL,
+    VALID_SNAPSHOT_STATUSES,
 )
 from .reconciliation_result import (
     ReconciliationResult,
@@ -113,6 +132,7 @@ __all__ = [
     "Store",
     "DemoScenarioState",
     "User",
+    "AuthSession",
     "Camera",
     "Zone",
     "Shelf",
@@ -129,6 +149,13 @@ __all__ = [
     "SaleItem",
     "Bill",
     "BillItem",
+    "SmsMessage",
+    "MSG_QUEUED",
+    "MSG_SENDING",
+    "MSG_SENT",
+    "MSG_FAILED",
+    "VALID_MESSAGE_STATUSES",
+    "DEFAULT_SMS_PROVIDER",
     "Notification",
     "Alert",
     "ALERT_SHORTAGE",
@@ -136,6 +163,7 @@ __all__ = [
     "ALERT_MISPLACEMENT",
     "ALERT_EXPIRY",
     "ALERT_LOW_SHELF_OCCUPANCY",
+    "ALERT_SHELF_EMPTY",
     "ALERT_CAMERA_OFFLINE",
     "ALERT_REVIEW_REQUIRED",
     "VALID_ALERT_TYPES",
@@ -157,6 +185,12 @@ __all__ = [
     "OBS_TEXT",
     "OBS_EXPIRY_METADATA",
     "VALID_OBSERVATION_TYPES",
+    "ShelfSnapshot",
+    "SNAPSHOT_EMPTY",
+    "SNAPSHOT_LOW",
+    "SNAPSHOT_MEDIUM",
+    "SNAPSHOT_FULL",
+    "VALID_SNAPSHOT_STATUSES",
     "ReconciliationResult",
     "REC_MATCH",
     "REC_SURPLUS",

@@ -52,6 +52,14 @@ export interface Camera {
   updated_at: string
 }
 
+// Manual shelf regions (M15/M27) stored in `Camera.config.shelf_regions`.
+// There is NO shelf detector — an operator configures these rectangles.
+export interface ShelfRegion {
+  code: string
+  label?: string
+  bbox: [number, number, number, number]
+}
+
 export interface Zone {
   id: string
   store_id: string
@@ -173,6 +181,7 @@ export interface BatchConfirmIn {
   expiry_date_precision?: string
   mrp?: string | number | null
   reference?: string | null
+  barcode?: string | null
 }
 
 export interface BatchReceipt {
@@ -236,6 +245,40 @@ export interface Bill {
   items: BillItem[]
   created_at: string
   updated_at: string
+}
+
+export type SmsStatus = 'QUEUED' | 'SENDING' | 'SENT' | 'FAILED'
+
+export interface SmsMessage {
+  id: string
+  store_id: string
+  bill_id: string | null
+  customer_id: string | null
+  mobile: string
+  message: string
+  status: SmsStatus
+  attempts: number
+  last_error: string | null
+  next_attempt_at: string | null
+  sent_at: string | null
+  provider: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SmsStatusCounts {
+  total: number
+  queued: number
+  sending: number
+  sent: number
+  failed: number
+}
+
+export interface SmsStatusRead {
+  enabled: boolean
+  provider: string
+  configured: boolean
+  counts: SmsStatusCounts
 }
 
 export interface Notification {
@@ -336,6 +379,31 @@ export interface EdgePipelineStatus {
   ocr: boolean
 }
 
+export interface StageProfileSample {
+  key: string
+  count: number
+  min_ms: number
+  mean_ms: number
+  p50_ms: number
+  p95_ms: number
+  max_ms: number
+}
+
+export interface PersonCacheStatus {
+  size: number
+  max_entries: number
+  ttl_seconds: number
+  hits: number
+  misses: number
+  inserts: number
+  evictions_capacity: number
+  evictions_ttl: number
+  reid_invocations: number
+  reid_skipped: number
+  new_global_identity: number
+  existing_identity_reused: number
+}
+
 export interface EdgeCameraStatus {
   camera_id: string
   name: string
@@ -343,8 +411,13 @@ export interface EdgeCameraStatus {
   running: boolean
   connection_ok: boolean
   error: string | null
+  health: 'RUNNING' | 'DEGRADED' | 'STARTING' | 'ERROR' | 'STOPPED' | 'DISABLED'
   enabled_pipelines: EdgePipelineStatus
   fps: number
+  capture_fps: number
+  inference_fps: number
+  inference_ms: number | null
+  last_frame_age_seconds: number | null
   frames_captured: number
   frames_processed: number
   frames_dropped: number
@@ -353,6 +426,17 @@ export interface EdgeCameraStatus {
   last_event_at: string | null
   uptime_seconds: number | null
   started_at: string | null
+  // M29: AI pacing + stage timings + hot person cache (present only when the
+  // worker actually runs; omitted = feature not active yet).
+  ai_target_fps?: number
+  stage_profile?: Record<string, { count: number; min_ms: number; mean_ms: number; p50_ms: number; p95_ms: number; max_ms: number }>
+  person_cache?: PersonCacheStatus | null
+  // M30: periodic shelf-occupancy monitoring + Layer-A mirror diagnostics
+  // (optional — old deployments omit these).
+  shelf_snapshots_written?: number
+  shelf_snapshot_interval_seconds?: number
+  last_shelf_scan_at?: string | null
+  shelf_snapshot_cache?: ShelfSnapshotCacheStatus | null
 }
 
 export interface EdgeStatus {
@@ -360,11 +444,15 @@ export interface EdgeStatus {
   offline: boolean
   camera_count: number
   active_cameras: number
+  max_cameras: number
   frames_processed: number
   observations_written: number
   last_detection_at: string | null
   models_loaded: string[]
   now: string
+  // M29/M30 Layer-A hot-cache diagnostics (optional — shared runtime only).
+  person_cache?: PersonCacheStatus | null
+  shelf_snapshot_cache?: ShelfSnapshotCacheStatus | null
 }
 
 export interface EdgeStartResponse {
@@ -405,6 +493,18 @@ export interface ProductIntelligenceRow {
   message: string | null
 }
 
+export interface ProductCandidateRow {
+  ai_class: string
+  visible_count: number
+  confidence: number | null
+  camera_id: string | null
+  camera_name: string | null
+  shelf_code: string | null
+  latest_observed_at: string | null
+  counting_rule: string
+  message: string
+}
+
 export interface ShelfVisibleProduct {
   ai_class: string
   product_id: string | null
@@ -439,6 +539,9 @@ export interface ShelfIntelligenceRow {
   latest_observed_at: string | null
   mean_confidence: number | null
   last_analysis_message: string | null
+  occupancy_method: string | null
+  occupancy_samples: number | null
+  refill_recommended: boolean
 }
 
 export interface MisplacementRow {
@@ -514,6 +617,7 @@ export type AlertType =
   | 'MISPLACEMENT'
   | 'EXPIRY'
   | 'LOW_SHELF_OCCUPANCY'
+  | 'SHELF_EMPTY'
   | 'CAMERA_OFFLINE'
   | 'REVIEW_REQUIRED'
 
@@ -647,6 +751,15 @@ export interface JourneySummary {
   avg_zone_dwell_seconds: number | null
   total_zone_visits: number
   most_visited_zone: MostVisitedZone | null
+}
+
+export interface DailyFootfallPoint {
+  date: string
+  visitors: number
+}
+
+export interface DailyFootfall {
+  items: DailyFootfallPoint[]
 }
 
 export interface ZoneAnalytics {
@@ -893,6 +1006,7 @@ export interface MobileIntakeJob {
   acceptable: boolean | null
   reason: string | null
   candidate: BatchScanCandidate | null
+  photo_url: string | null
   created_at: string
   updated_at: string
 }
@@ -900,4 +1014,71 @@ export interface MobileIntakeJob {
 export interface MobileIntakeJobList {
   items: MobileIntakeJob[]
   count: number
+}
+
+// ── M30: Periodic Shelf-Occupancy Snapshots ─────────────────────────────
+// Mirrors backend/app/schemas/shelf_snapshot.py. Snapshots are OBSERVATIONS
+// (never mutate inventory); the summary/history endpoints are served from the
+// edge runtime's in-memory mirror when available, falling back to PostgreSQL.
+
+export type ShelfSnapshotStatus =
+  | 'EMPTY'
+  | 'LOW'
+  | 'MEDIUM'
+  | 'FULL'
+  | 'OCCLUDED'
+
+export interface ShelfSnapshotRow {
+  id: string
+  store_id: string
+  camera_id: string | null
+  shelf_code: string
+  shelf_label: string | null
+  region_bbox: number[] | null
+  snapshot_path: string | null
+  crop_path: string | null
+  has_image: boolean
+  fill_percentage: number
+  status: string
+  product_count: number
+  occluded: boolean
+  occlusion_note: string | null
+  confidence: number | null
+  observed_at: string
+  created_at: string | null
+}
+
+export interface ShelfStatusCounts {
+  EMPTY: number
+  LOW: number
+  MEDIUM: number
+  FULL: number
+  OCCLUDED: number
+}
+
+export interface ShelfSnapshotSummary {
+  items: ShelfSnapshotRow[]
+  status: ShelfStatusCounts
+  total_regions: number
+  last_scan_at: string | null
+}
+
+export interface ShelfHistoryResponse {
+  shelf_code: string
+  camera_id: string | null
+  items: ShelfSnapshotRow[]
+  total: number
+}
+
+export interface ShelfSnapshotCacheStatus {
+  size: number
+  regions: number
+  max_entries: number
+  ttl_seconds: number
+  hits: number
+  misses: number
+  inserts: number
+  evictions_capacity: number
+  evictions_ttl: number
+  hit_rate: number
 }

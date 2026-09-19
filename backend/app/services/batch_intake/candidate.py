@@ -93,7 +93,7 @@ class PackageScan:
         ]
         warnings = list(parsed.warnings)
 
-        if not barcode_read and not labels_found:
+        if not barcode_read and not labels_found and not product_found:
             return cls(
                 acceptable=False,
                 reason=UNABLE_TO_READ_MESSAGE,
@@ -111,12 +111,16 @@ class PackageScan:
             )
 
         notes: list[str] = []
-        if barcode_read and product_found:
-            notes.append(f"Barcode matched product '{product_name}'.")
-        elif barcode_read and not product_found:
+        if product_found:
+            if barcode_read:
+                notes.append(f"Barcode matched product '{product_name}'.")
+            else:
+                notes.append(f"Identified product '{product_name}' from packaging.")
+        elif barcode_read:
             notes.append("Barcode is not linked to any product. Select a product to continue.")
-        if not barcode_read:
-            notes.append("No barcode decoded. Select a product to continue.")
+        else:
+            notes.append("Select a product to continue.")
+
         if not labels_found:
             notes.append("No expiry/batch text found. Enter the values below or retake the photo.")
 

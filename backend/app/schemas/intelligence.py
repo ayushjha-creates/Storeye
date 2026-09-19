@@ -50,6 +50,9 @@ class ShelfIntelligenceRead(BaseModel):
     latest_observed_at: Optional[datetime] = None
     mean_confidence: Optional[float] = None
     last_analysis_message: Optional[str] = None
+    occupancy_method: Optional[str] = None
+    occupancy_samples: Optional[int] = None
+    refill_recommended: bool = False
 
 
 class ShelfIntelligenceList(BaseModel):
@@ -82,6 +85,28 @@ class ProductIntelligenceRead(BaseModel):
 
 class ProductIntelligenceList(BaseModel):
     items: List[ProductIntelligenceRead]
+    total: int
+
+
+class ProductCandidateRead(BaseModel):
+    """PRODUCT_CANDIDATE: a detected AI class not mapped to any catalog product.
+
+    Read-only and never guessed — the operator decides the mapping.
+    """
+
+    ai_class: str
+    visible_count: int
+    confidence: Optional[float] = None
+    camera_id: Optional[UUID] = None
+    camera_name: Optional[str] = None
+    shelf_code: Optional[str] = None
+    latest_observed_at: Optional[datetime] = None
+    counting_rule: str
+    message: str
+
+
+class ProductCandidateList(BaseModel):
+    items: List[ProductCandidateRead]
     total: int
 
 

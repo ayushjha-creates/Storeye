@@ -17,8 +17,8 @@ export function AlertList({
   if (alerts.length === 0) {
     return (
       <EmptyState
-        title="No alerts match"
-        hint="Run “Evaluate now” after the Edge AI has been observing to generate intelligence-based alerts."
+        title="Nothing flagged"
+        hint="Run “Check now” after your cameras have been watching to review anything Storeye noticed."
       />
     )
   }

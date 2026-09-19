@@ -317,6 +317,49 @@ describe('CameraDetailPage', () => {
     })
   })
 
+  it('polls live so newly-detected observations appear without a manual refresh', async () => {
+    const initial = detailRoutes({ ...BASE_CAMERA, config: {} })
+    const routes: Record<string, unknown> = { ...initial }
+    stubFetchRoutes(routes)
+    render(
+      <EdgeProvider>
+        <MemoryRouter initialEntries={[`/cameras/${CAMERA_ID}`]}>
+          <Routes>
+            <Route path="/cameras/:cameraId" element={<CameraDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </EdgeProvider>,
+    )
+
+    expect(await screen.findByText(/2 in view/i)).toBeInTheDocument()
+
+    // A new real observation lands in the backend after the page was opened.
+    routes['/api/observations'] = {
+      items: [
+        ...initial['/api/observations'].items,
+        {
+          id: 'o3',
+          observation_type: 'PERSON',
+          store_id: STORE_ID,
+          camera_id: CAMERA_ID,
+          product_id: null,
+          track_id: 4,
+          confidence: 0.88,
+          bbox: [10, 10, 30, 60],
+          text: null,
+          observed_at: '2026-09-06T10:01:00Z',
+        },
+      ],
+      total: 3,
+    }
+
+    // The poller (2s) must surface it without any user action.
+    await vi.waitFor(
+      () => expect(screen.getByText(/3 in view/i)).toBeInTheDocument(),
+      { timeout: 3000, interval: 100 },
+    )
+  })
+
   it('shows the AI runtime as unavailable when the Edge runtime is unreachable', async () => {
     renderDetail({ ...BASE_CAMERA, config: {} })
 

@@ -42,6 +42,7 @@ from app.services.batch_intake import (
 )
 from app.services.inventory.errors import EntityNotFoundError, ValidationError
 from app.services.vision.ocr import OCRResult
+from tests.conftest import bind_test_user
 
 pytestmark = pytest.mark.pg
 
@@ -86,7 +87,16 @@ def store(db) -> Store:
     db.add(s)
     db.commit()
     db.refresh(s)
+    # Authenticate HTTP calls in this module as an OWNER of this store.
+    bind_test_user(s.id)
     return s
+
+
+@pytest.fixture(autouse=True)
+def _reset_auth_overrides():
+    yield
+    from app.main import app
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture()
@@ -278,6 +288,32 @@ def test_scan_without_store_scopes_to_any_store(db, product):
     assert scan.candidate.product_found is True
 
 
+def test_scan_resolves_product_via_ocr_text_matcher(db, store, product):
+    # Regression: scan crashed with "ProductNameMatcher has no attribute
+    # 'match_best'" after the matcher API became match_lines(). The OCR text
+    # path must resolve the catalog product without a barcode.
+    class TextOcr:
+        def extract_text(self, image_bgr):
+            from app.services.vision.ocr import OCRTextItem
+
+            return OCRResult(
+                items=[
+                    OCRTextItem(
+                        text=product.name,
+                        confidence=0.95,
+                        bbox_xyxy=[0, 0, 100, 30],
+                    )
+                ]
+            )
+
+    svc = _service(db, ocr_any=PackageOCRProcessor(ocr_factory=TextOcr))
+    scan = svc.scan_package(_image_bytes(), store_id=store.id)
+    assert scan.acceptable is True
+    assert scan.candidate.product_id == str(product.id)
+    assert scan.candidate.product_found is True
+    assert scan.candidate.product_name == product.name
+
+
 # ---------------------------------------------------------------------------
 # 3. Confirm: atomic, human-confirmed, reuses domain services
 # ---------------------------------------------------------------------------
@@ -429,7 +465,7 @@ def client(session_factory):
     app.dependency_overrides.clear()
 
 
-def test_api_scan_unknown_image_returns_422(client):
+def test_api_scan_unknown_image_returns_422(client, db, store):
     r = client.post(
         "/api/batch-intake/scan",
         files={"file": ("noop.txt", b"hello", "text/plain")},
@@ -548,3 +584,33 @@ def test_api_product_barcode_field_roundtrip(client, db, store):
     )
     assert upd.status_code == 200
     assert upd.json()["barcode"] == "8900000000008"
+
+
+def test_api_confirm_links_barcode_to_product_if_empty(client, db, store):
+    unlinked = Product(
+        store_id=store.id,
+        sku="UNLINKED-01",
+        name="Unlinked Product",
+        selling_price=50,
+        barcode=None,
+    )
+    db.add(unlinked)
+    db.commit()
+    db.refresh(unlinked)
+    assert unlinked.barcode is None
+
+    r = client.post(
+        "/api/batch-intake/confirm",
+        json={
+            "store_id": str(store.id),
+            "product_id": str(unlinked.id),
+            "quantity": 5,
+            "barcode": "8909876543210",
+            "batch_number": "LINK-01",
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    # Refresh product and verify barcode was linked
+    db.refresh(unlinked)
+    assert unlinked.barcode == "8909876543210"

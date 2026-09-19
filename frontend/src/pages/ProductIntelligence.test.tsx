@@ -43,7 +43,7 @@ const ROWS = [
     database_quantity: null,
     difference: null,
     comparison_status: 'NOT_ASSESSED',
-    message: 'Unmapped AI class — assign Product.ai_classes to tie it to a product.',
+    message: 'Unknown product — the model detected this class but it is not mapped to a catalog product. Map it via Product.ai_classes; nothing is guessed.',
   },
 ]
 
@@ -67,7 +67,7 @@ describe('ProductIntelligencePage', () => {
     expect(await screen.findByRole('heading', { name: /product intelligence/i })).toBeInTheDocument()
     expect(screen.getByText('Lays Classic')).toBeInTheDocument()
     expect(screen.getByText('Possible shortage (fewer visible than recorded)')).toBeInTheDocument()
-    expect(screen.getAllByText('Unmapped AI class').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/unknown product — map to catalog/i).length).toBeGreaterThan(0)
     expect(screen.getByText('CocaCola')).toBeInTheDocument()
     // DB inventory of the mapped product shown; unmapped shows no inventory.
     expect(screen.getAllByText('5').length).toBeGreaterThan(0)

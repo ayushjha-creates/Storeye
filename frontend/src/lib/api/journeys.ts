@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { JourneyList, JourneyDetail, JourneySummary, ZoneAnalytics } from './types'
+import type { JourneyList, JourneyDetail, JourneySummary, ZoneAnalytics, DailyFootfall } from './types'
 
 export interface JourneyListParams {
   store_id: string
@@ -38,6 +38,8 @@ export const journeyApi = {
     ),
   summary: (params: JourneySummaryParams) =>
     api.get<JourneySummary>('/api/journeys/summary', params as unknown as Record<string, unknown>),
+  daily: (params: { store_id: string; days?: number }) =>
+    api.get<DailyFootfall>('/api/journeys/daily', params as unknown as Record<string, unknown>),
   zoneAnalytics: (zoneId: string, params?: ZoneAnalyticsParams) =>
     api.get<ZoneAnalytics>(
       `/api/zones/${encodeURIComponent(zoneId)}/analytics`,

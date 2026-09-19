@@ -254,7 +254,7 @@ def test_product_intelligence_unmapped_class(db, store, camera):
     assert len(rows) == 2
     assert all(not r.mapped for r in rows)
     assert all(r.comparison_status == COMP_NOT_ASSESSED for r in rows)
-    assert any("Unmapped AI class" in (r.message or "") for r in rows)
+    assert any("Unknown product" in (r.message or "") for r in rows)
     assert all(r.product_id is None for r in rows)
 
 
@@ -331,6 +331,29 @@ def test_shelf_low_visible(db, store, product, camera):
     _record_product(db, store, camera, "Lays", product_id=product.id, bbox=[10, 10, 30, 20])  # small in A1
     a1 = {r.shelf_code: r for r in ShelfIntelligenceService(db).shelves(store_id=store.id)}["A1"]
     assert a1.detection_status == SHELF_STATE_LOW
+    assert a1.refill_recommended is True
+
+
+def test_shelf_half_full_recommends_refill(db, store, product, camera):
+    # A1 region is 100x100; a 50x100 product covers exactly half.
+    _record_product(db, store, camera, "Lays", product_id=product.id, bbox=[0, 0, 50, 100])
+    a1 = {r.shelf_code: r for r in ShelfIntelligenceService(db).shelves(store_id=store.id)}["A1"]
+    assert a1.estimated_visible_occupancy == 0.5
+    assert a1.detection_status == SHELF_STATE_LOW  # half full or less
+    assert a1.refill_recommended is True
+
+
+def test_shelf_normal_visible_is_deterministic(db, store, product, camera):
+    # A large, well-centred product in A1 gives a high visible occupancy.
+    _record_product(db, store, camera, "Lays", product_id=product.id, bbox=[0, 0, 80, 80])
+    first = {r.shelf_code: r for r in ShelfIntelligenceService(db).shelves(store_id=store.id)}["A1"]
+    second = {r.shelf_code: r for r in ShelfIntelligenceService(db).shelves(store_id=store.id)}["A1"]
+    assert first.detection_status == SHELF_STATE_NORMAL
+    assert first.refill_recommended is False
+    # Repeated reads are stable: same status, same estimate, same method.
+    assert second.detection_status == SHELF_STATE_NORMAL
+    assert second.estimated_visible_occupancy == first.estimated_visible_occupancy
+    assert second.occupancy_method == first.occupancy_method
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +365,7 @@ def test_shelf_empty_visible(db, store, product, camera):
     by_code = {r.shelf_code: r for r in ShelfIntelligenceService(db).shelves(store_id=store.id)}
     assert by_code["B2"].detection_status == SHELF_STATE_EMPTY
     assert by_code["B2"].estimated_visible_occupancy == 0.0
+    assert by_code["B2"].refill_recommended is True
     assert "no visible product" in (by_code["B2"].last_analysis_message or "")
     assert by_code["A1"].detection_status != SHELF_STATE_EMPTY
 
@@ -471,6 +495,76 @@ def test_parse_shelf_regions_validation(db, store):
     codes = [r.code for r in regions]
     assert codes == ["A1", "BAD2", "A2"]
     assert regions[0].bbox == [0, 0, 100, 100]
+
+
+# ---------------------------------------------------------------------------
+# 20. PRODUCT_CANDIDATE path: only unmapped detections, never guessed
+# ---------------------------------------------------------------------------
+def test_product_candidates_only_unmapped(db, store, product, mapped_product, camera):
+    _record_product(db, store, camera, "Lays", product_id=product.id, bbox=[0, 0, 20, 20])
+    _record_product(db, store, camera, "CocaCola", bbox=[30, 0, 50, 20])
+    cands = ProductIntelligenceService(db).candidates(store_id=store.id)
+    assert len(cands) == 1
+    assert cands[0].ai_class == "CocaCola"
+    assert cands[0].mapped is False
+    assert cands[0].product_id is None
+    assert "Unknown product" in (cands[0].message or "")
+    # A mapped detection is never a candidate.
+    assert all(c.ai_class != "Lays" for c in cands)
+
+
+def test_product_candidates_camera_scope(db, store, product):
+    cam1 = Camera(name="c1", store_id=store.id)
+    cam2 = Camera(name="c2", store_id=store.id)
+    db.add_all([cam1, cam2]); db.commit(); db.refresh(cam1); db.refresh(cam2)
+    _record_product(db, store, cam1, "CocaCola", bbox=[0, 0, 20, 20])
+    _record_product(db, store, cam2, "Sprite", bbox=[0, 0, 20, 20])
+    svc = ProductIntelligenceService(db)
+    assert len(svc.candidates(store_id=store.id)) == 2
+    only = svc.candidates(store_id=store.id, camera_id=cam1.id)
+    assert len(only) == 1 and only[0].ai_class == "CocaCola"
+
+
+# ---------------------------------------------------------------------------
+# 21. Shelf temporal smoothing: a single detection spike is ignored
+# ---------------------------------------------------------------------------
+def test_shelf_temporal_smoothing_ignores_single_spike(db, store, product, camera):
+    now = _now()
+    # Three quiet minute-buckets (small 10x10 box = 1% occupancy each)...
+    for i in range(3):
+        _record_product(
+            db, store, camera, "Lays", product_id=product.id,
+            bbox=[0, 0, 10, 10], frame=i,
+            observed_at=now - timedelta(minutes=4 - i),
+        )
+    # ...plus one spike bucket where the whole region is covered.
+    _record_product(
+        db, store, camera, "Lays", product_id=product.id,
+        bbox=[0, 0, 100, 100], frame=99,
+        observed_at=now - timedelta(minutes=1),
+    )
+    a1 = {r.shelf_code: r for r in ShelfIntelligenceService(db).shelves(store_id=store.id)}["A1"]
+    # Raw whole-window occupancy would be ~1.0; the median ignores the spike.
+    assert a1.occupancy_method == "median_60s"
+    assert a1.occupancy_samples == 4
+    assert a1.estimated_visible_occupancy is not None
+    assert a1.estimated_visible_occupancy < 0.5
+    assert a1.detection_status != SHELF_STATE_NORMAL
+
+
+def test_shelf_smoothing_falls_back_to_raw_with_few_buckets(db, store, product, camera):
+    now = _now()
+    for i in range(4):
+        _record_product(
+            db, store, camera, "Lays", product_id=product.id,
+            bbox=[0, 0, 20, 20], frame=i,
+            observed_at=now - timedelta(seconds=1),
+        )
+    a1 = {r.shelf_code: r for r in ShelfIntelligenceService(db).shelves(store_id=store.id)}["A1"]
+    # All observations share one minute-bucket -> not enough data to smooth.
+    assert a1.occupancy_method == "raw"
+    assert a1.occupancy_samples == 1
+    assert a1.estimated_visible_occupancy is not None
 
 
 # ---------------------------------------------------------------------------

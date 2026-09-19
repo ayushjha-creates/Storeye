@@ -64,14 +64,17 @@ Existing observations (patterns + details)
 ## Domain decisions (locked)
 
 ### Alert types
-`SHORTAGE, SURPLUS, MISPLACEMENT, EXPIRY, LOW_SHELF_OCCUPANCY, CAMERA_OFFLINE,
-REVIEW_REQUIRED`
+`SHORTAGE, SURPLUS, MISPLACEMENT, EXPIRY, LOW_SHELF_OCCUPANCY, SHELF_EMPTY,
+CAMERA_OFFLINE, REVIEW_REQUIRED`
 
 ### Severity (independent of confidence)
 `INFO, LOW, MEDIUM, HIGH, CRITICAL`
 - SHORTAGE: ≥0.5 confidence → CRITICAL; ≥0.2 → HIGH; else MEDIUM
 - SURPLUS: ≥0.5 → HIGH; ≥0.2 → MEDIUM; else LOW
-- MISPLACEMENT: LOW · LOW_SHELF_OCCUPANCY: occupancy <15% → MEDIUM else LOW
+- MISPLACEMENT: LOW
+- SHELF_EMPTY (no visible product): CRITICAL — "refill now / ASAP"
+- LOW_SHELF_OCCUPANCY (visible occupancy at/below half): occupancy <15% → HIGH else
+  MEDIUM — "about to get empty, refill soon"
 - EXPIRY: EXPIRED → HIGH; EXPIRING_SOON/EXPIRY_MONTH → MEDIUM
 - CAMERA_OFFLINE: MEDIUM · REVIEW_REQUIRED: LOW
 
@@ -93,8 +96,11 @@ new alert on the next evaluation.
 - Shortage/surplus from `comparison_status` + confidence ≥ threshold (default 0.5);
   only mapped products.
 - Misplacement only on planogram-based mapped products (`possible_misplacement`).
-- Low-shelf occupancy only when the shelf state is present (LOW_VISIBLE); UNKNOWN never
-  alerts.
+- Shelf fill: EMPTY_VISIBLE → `SHELF_EMPTY` (CRITICAL) and LOW_VISIBLE → 
+  `LOW_SHELF_OCCUPANCY` (`refill_soon`). UNKNOWN (no AI evidence) never alerts. This
+  rule also runs after `POST /api/reconciliation/run` (`evaluate_shelf_fill`,
+  `trigger="reconciliation"`) so refilling surfaces as a reconciliation outcome; it
+  writes only `alerts` rows, never stock.
 - Review-required from a persisted `ReconciliationResult.status == REC_REVIEW` snapshot
   within the evaluation window.
 - Expiry through `ExpiryIntelligence.reference_date` (injectable), threshold via

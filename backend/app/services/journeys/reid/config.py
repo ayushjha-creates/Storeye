@@ -47,6 +47,27 @@ class ReIDConfig:
     # only refresh periodically (never per-frame).
     refresh_interval_seconds: float = 10.0
 
+    # -- Same-camera re-acquisition (M27 Phase 2-5) ---------------------
+    # ByteTrack inevitably drops and re-creates local track ids for one
+    # physical person (brief occlusion, motion blur, detector flicker). The
+    # old rule refused ALL same-camera matches, so every re-created track
+    # became a brand-new global id AND a brand-new journey. We now permit a
+    # NARROW reconnect: a lost local track may re-attach to its global id
+    # only when it is the only person currently on that camera, the absence
+    # is short, and appearance is a strong match. Concurrent same-camera
+    # tracks are still never merged (false merges remain unacceptable).
+    same_camera_reacquisition: bool = True
+    # Minimum absence (s) before reconnect is considered. Below this the
+    # candidate is treated as a concurrent, still-visible track.
+    same_camera_reacquisition_seconds: float = 2.0
+    # Maximum absence (s) before a same-camera reconnect is refused (the
+    # person has genuinely left; a later return within this window still
+    # reconnects, beyond it starts a new session per rule F).
+    same_camera_reacquisition_max_gap_seconds: float = 15.0
+    # Stricter appearance bar for same-camera reconnect than cross-camera,
+    # because there is no camera-transition evidence to corroborate it.
+    same_camera_similarity_threshold: float = 0.85
+
     def validate(self) -> None:
         for name in ("similarity_threshold", "high_confidence_score"):
             v = getattr(self, name)
@@ -58,6 +79,21 @@ class ReIDConfig:
             raise ValueError("global_timeout_seconds must be > 0")
         if self.refresh_interval_seconds < 0:
             raise ValueError("refresh_interval_seconds must be >= 0")
+        if self.same_camera_reacquisition_seconds < 0:
+            raise ValueError("same_camera_reacquisition_seconds must be >= 0")
+        if (
+            self.same_camera_reacquisition_max_gap_seconds
+            < self.same_camera_reacquisition_seconds
+        ):
+            raise ValueError(
+                "same_camera_reacquisition_max_gap_seconds must be >= "
+                "same_camera_reacquisition_seconds"
+            )
+        if not 0.0 < self.same_camera_similarity_threshold <= 1.0:
+            raise ValueError(
+                "same_camera_similarity_threshold must be in (0, 1], got "
+                f"{self.same_camera_similarity_threshold!r}"
+            )
 
     @classmethod
     def from_settings(cls, settings) -> "ReIDConfig":
@@ -70,4 +106,16 @@ class ReIDConfig:
             max_time_gap_seconds=float(settings.REID_MAX_TIME_GAP_SECONDS),
             global_timeout_seconds=float(settings.GLOBAL_PERSON_TIMEOUT_SECONDS),
             refresh_interval_seconds=float(settings.REID_UPDATE_INTERVAL_SECONDS),
+            same_camera_reacquisition=bool(
+                getattr(settings, "REID_SAME_CAMERA_REACQUISITION", True)
+            ),
+            same_camera_reacquisition_seconds=float(
+                getattr(settings, "REID_SAME_CAMERA_REACQUISITION_SECONDS", 2.0)
+            ),
+            same_camera_reacquisition_max_gap_seconds=float(
+                getattr(settings, "REID_SAME_CAMERA_REACQUISITION_MAX_GAP_SECONDS", 15.0)
+            ),
+            same_camera_similarity_threshold=float(
+                getattr(settings, "REID_SAME_CAMERA_SIMILARITY_THRESHOLD", 0.85)
+            ),
         )

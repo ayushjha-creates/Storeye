@@ -26,8 +26,20 @@ const routes = {
         delivery_status: 'DRAFT',
         items: [],
       },
+      {
+        id: 'b2',
+        store_id: STORE_ID,
+        bill_number: 'BILL-002',
+        sale_id: null,
+        customer_id: CUSTOMER_ID,
+        subtotal: '20.00',
+        tax_total: '0.00',
+        total: '20.00',
+        delivery_status: 'DRAFT',
+        items: [],
+      },
     ],
-    total: 1,
+    total: 2,
   },
   '/api/products': {
     items: [
@@ -38,6 +50,33 @@ const routes = {
   '/api/customers': {
     items: [
       { id: CUSTOMER_ID, store_id: STORE_ID, mobile: '9876500000', name: 'Ravi Kumar' },
+    ],
+    total: 1,
+  },
+  '/api/sms/status': {
+    enabled: true,
+    provider: 'msg91',
+    configured: true,
+    counts: { total: 2, queued: 0, sending: 0, sent: 1, failed: 1 },
+  },
+  '/api/sms/messages': {
+    items: [
+      {
+        id: 'm1',
+        store_id: STORE_ID,
+        bill_id: 'b2',
+        customer_id: CUSTOMER_ID,
+        mobile: '9876500000',
+        message: 'Receipt for BILL-002',
+        status: 'SENT',
+        attempts: 1,
+        last_error: null,
+        next_attempt_at: null,
+        sent_at: '2026-09-18T10:00:00Z',
+        provider: 'msg91',
+        created_at: '2026-09-18T10:00:00Z',
+        updated_at: '2026-09-18T10:00:00Z',
+      },
     ],
     total: 1,
   },
@@ -57,8 +96,8 @@ describe('BillingPage', () => {
     )
 
     expect(await screen.findByText('BILL-001')).toBeInTheDocument()
-    expect(screen.getByText(/manual billing only/i)).toBeInTheDocument()
-    expect(screen.getByText(/no AI-generated billing/i)).toBeInTheDocument()
+    expect(screen.getByText(/your bills for today/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /recent bills/i })).toBeInTheDocument()
     expect(screen.getByText('₹105.00')).toBeInTheDocument()
   })
 
@@ -70,7 +109,7 @@ describe('BillingPage', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.click(await screen.findByRole('button', { name: /\+ new bill/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /\+ new sale/i }))
 
     expect(screen.getByText(/create manual bill/i)).toBeInTheDocument()
     expect(screen.getByText(/amul milk 1l/i)).toBeInTheDocument() // auto-added line item
@@ -78,5 +117,81 @@ describe('BillingPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /save bill/i }))
 
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/api/bills'))).toBe(true)
+  })
+
+  it('shows receipt SMS delivery state and the on-banner when SMS is enabled', async () => {
+    stubFetchRoutes(routes)
+    render(
+      <MemoryRouter>
+        <BillingPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(/receipt sms is on/i)).toBeInTheDocument()
+    expect(screen.getByText(/sent 1/i)).toBeInTheDocument()
+    // Walk-in bill has no phone -> no receipt; customer bill shows its Sent badge.
+    expect(screen.getByText('Sent')).toBeInTheDocument()
+    expect(screen.getByText('—').closest('tr')).not.toBeNull()
+  })
+
+  it('resends a failed SMS receipt from the bill row', async () => {
+    const withFailure = {
+      ...routes,
+      '/api/sms/messages': {
+        items: [
+          {
+            id: 'm2',
+            store_id: STORE_ID,
+            bill_id: 'b2',
+            customer_id: CUSTOMER_ID,
+            mobile: '9876500000',
+            message: 'Receipt for BILL-002',
+            status: 'FAILED',
+            attempts: 5,
+            last_error: 'HTTP 502: upstream',
+            next_attempt_at: null,
+            sent_at: null,
+            provider: 'msg91',
+            created_at: '2026-09-18T10:00:00Z',
+            updated_at: '2026-09-18T11:00:00Z',
+          },
+        ],
+        total: 1,
+      },
+    }
+    const fetchMock = stubFetchRoutes(withFailure)
+    render(
+      <MemoryRouter>
+        <BillingPage />
+      </MemoryRouter>,
+    )
+
+    const resend = await screen.findByRole('button', { name: /resend/i })
+    expect(screen.getByText('Failed')).toBeInTheDocument()
+    await userEvent.click(resend)
+
+    expect(
+      fetchMock.mock.calls.some((c) => String(c[0]).includes('/api/sms/messages/m2/resend')),
+    ).toBe(true)
+  })
+
+  it('hides the SMS banner when SMS delivery is disabled', async () => {
+    stubFetchRoutes({
+      ...routes,
+      '/api/sms/status': {
+        enabled: false,
+        provider: 'msg91',
+        configured: false,
+        counts: { total: 0, queued: 0, sending: 0, sent: 0, failed: 0 },
+      },
+    })
+    render(
+      <MemoryRouter>
+        <BillingPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('BILL-001')).toBeInTheDocument()
+    expect(screen.queryByText(/receipt sms is on/i)).not.toBeInTheDocument()
   })
 })

@@ -8,6 +8,7 @@ import type {
   AISummary,
   ApiList,
   MisplacementRow,
+  ProductCandidateRow,
   ProductIntelligenceRow,
   ShelfIntelligenceRow,
 } from './types'
@@ -24,6 +25,8 @@ export type IntelligenceParams = {
 export const intelligenceApi = {
   products: (params: IntelligenceParams) =>
     api.get<ApiList<ProductIntelligenceRow>>('/api/intelligence/products', params),
+  productCandidates: (params: IntelligenceParams) =>
+    api.get<ApiList<ProductCandidateRow>>('/api/intelligence/product-candidates', params),
   shelves: (params: IntelligenceParams) =>
     api.get<ApiList<ShelfIntelligenceRow>>('/api/intelligence/shelves', params),
   misplacements: (params: IntelligenceParams) =>
@@ -37,7 +40,7 @@ export const COMPARISON_STATUS_LABEL: Record<string, string> = {
   POSSIBLE_SHORTAGE: 'Possible shortage (fewer visible than recorded)',
   POSSIBLE_SURPLUS: 'Possible surplus (more visible than recorded)',
   NO_INVENTORY: 'No inventory record',
-  NOT_ASSESSED: 'Unmapped AI class',
+  NOT_ASSESSED: 'Unknown product — map to catalog',
 }
 
 export const SHELF_STATE_LABEL: Record<string, string> = {

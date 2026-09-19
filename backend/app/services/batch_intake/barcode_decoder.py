@@ -88,18 +88,47 @@ class PyZbarBarcodeDecoder(BarcodeDecoder):
         logger.info("PyZbarBarcodeDecoder ready using libzbar at %s", path)
 
     def decode(self, image_bgr) -> List[DecodedBarcode]:
-        try:
-            results = self._decode(image_bgr)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("zbar decode raised: %s", exc)
+        if image_bgr is None:
             return []
+        import cv2
+
+        candidates = [image_bgr]
+        try:
+            candidates.append(cv2.rotate(image_bgr, cv2.ROTATE_90_CLOCKWISE))
+            candidates.append(cv2.rotate(image_bgr, cv2.ROTATE_90_COUNTERCLOCKWISE))
+        except Exception:
+            pass
+
+        results = []
+        for img in candidates:
+            try:
+                results = self._decode(img)
+                if results:
+                    break
+            except Exception as exc:
+                logger.warning("zbar decode raised: %s", exc)
+
+        # If still nothing, try grayscale contrast enhancement
+        if not results:
+            try:
+                gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+                results = self._decode(gray)
+                if not results:
+                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                    results = self._decode(clahe.apply(gray))
+            except Exception:
+                pass
+
         decoded: List[DecodedBarcode] = []
+        seen = set()
         for item in results:
             try:
                 data = item.data.decode("utf-8", errors="replace")
             except AttributeError:
                 data = str(item)
-            if data:
+            data = data.strip()
+            if data and data not in seen:
+                seen.add(data)
                 decoded.append(
                     DecodedBarcode(
                         data=data,
@@ -124,10 +153,112 @@ class FakeBarcodeDecoder(BarcodeDecoder):
         return list(self.reads)
 
 
+class OpenCVBarcodeDecoder(BarcodeDecoder):
+    """Fallback barcode decoder using OpenCV's BarcodeDetector and QRCodeDetector."""
+
+    def __init__(self) -> None:
+        import cv2
+
+        self._barcode_det = (
+            cv2.barcode.BarcodeDetector() if hasattr(cv2, "barcode") else None
+        )
+        self._qr_det = (
+            cv2.QRCodeDetector() if hasattr(cv2, "QRCodeDetector") else None
+        )
+
+    def decode(self, image_bgr) -> List[DecodedBarcode]:
+        if image_bgr is None:
+            return []
+        import cv2
+
+        decoded: List[DecodedBarcode] = []
+        seen = set()
+
+        rotations = [image_bgr]
+        try:
+            rotations.append(cv2.rotate(image_bgr, cv2.ROTATE_90_CLOCKWISE))
+            rotations.append(cv2.rotate(image_bgr, cv2.ROTATE_90_COUNTERCLOCKWISE))
+        except Exception:
+            pass
+
+        for img in rotations:
+            if self._barcode_det is not None:
+                try:
+                    res = self._barcode_det.detectAndDecodeMulti(img)
+                    if res and res[0] and res[1]:
+                        for info, b_type in zip(res[1], res[2]):
+                            data = str(info or "").strip()
+                            if data and data not in seen:
+                                seen.add(data)
+                                decoded.append(
+                                    DecodedBarcode(
+                                        data=data,
+                                        symbology=str(b_type or "BARCODE"),
+                                        confidence=0.95,
+                                    )
+                                )
+                except Exception:
+                    pass
+
+            if self._qr_det is not None and not decoded:
+                try:
+                    res = self._qr_det.detectAndDecodeMulti(img)
+                    if res and res[0] and res[1]:
+                        for info in res[1]:
+                            data = str(info or "").strip()
+                            if data and data not in seen:
+                                seen.add(data)
+                                decoded.append(
+                                    DecodedBarcode(
+                                        data=data,
+                                        symbology="QRCODE",
+                                        confidence=0.95,
+                                    )
+                                )
+                except Exception:
+                    pass
+
+            if decoded:
+                break
+
+        return decoded
+
+
+class CompositeBarcodeDecoder(BarcodeDecoder):
+    """Tries pyzbar first (fastest/standard), then falls back to OpenCV's BarcodeDetector."""
+
+    def __init__(
+        self,
+        primary: Optional[BarcodeDecoder] = None,
+        fallback: Optional[BarcodeDecoder] = None,
+    ) -> None:
+        self.primary = primary
+        self.fallback = fallback or OpenCVBarcodeDecoder()
+
+    def decode(self, image_bgr) -> List[DecodedBarcode]:
+        if self.primary is not None:
+            try:
+                res = self.primary.decode(image_bgr)
+                if res:
+                    return res
+            except Exception as exc:
+                logger.warning("Primary barcode decode raised: %s", exc)
+
+        if self.fallback is not None:
+            try:
+                return self.fallback.decode(image_bgr)
+            except Exception as exc:
+                logger.warning("Fallback barcode decode raised: %s", exc)
+        return []
+
+
 def make_barcode_decoder() -> Optional[BarcodeDecoder]:
-    """Build the best available local decoder (None when unavailable)."""
+    """Build the best available local decoder (pyzbar + OpenCV fallback)."""
+    primary = None
     try:
-        return PyZbarBarcodeDecoder()
+        primary = PyZbarBarcodeDecoder()
     except BarcodeUnavailableError as exc:
-        logger.warning("Barcode decoding unavailable: %s", exc)
-        return None
+        logger.info(
+            "pyzbar barcode decoding unavailable (%s); using OpenCV fallback", exc
+        )
+    return CompositeBarcodeDecoder(primary=primary)

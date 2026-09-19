@@ -12,9 +12,17 @@ from .demo import (
     DemoStatusRead,
 )
 from .user import UserCreate, UserRead, UserUpdate, UserList
+from .auth import AuthUserRead, ChangePasswordIn, LoginIn, LoginResponse, MessageOut
 from .camera import CameraCreate, CameraRead, CameraUpdate, CameraList
 from .zone import ZoneAnalyticsRead, ZoneCreate, ZoneRead, ZoneUpdate, ZoneList
 from .shelf import ShelfCreate, ShelfRead, ShelfUpdate, ShelfList
+from .shelf_snapshot import (
+    ShelfHistoryRead,
+    ShelfSnapshotListRead,
+    ShelfSnapshotRead,
+    ShelfSnapshotSummaryRead,
+    ShelfStatusCounts,
+)
 from .product import ProductCreate, ProductRead, ProductUpdate, ProductList
 from .batch import BatchCreate, BatchRead, BatchUpdate, BatchList
 from .inventory import (
@@ -36,6 +44,12 @@ from .bill import (
     BillList,
     BillRead,
     BillUpdate,
+)
+from .sms import (
+    SmsMessageList,
+    SmsMessageRead,
+    SmsStatusCounts,
+    SmsStatusRead,
 )
 from .notification import (
     NotificationCreate,
@@ -75,6 +89,8 @@ from .intelligence import (
     MisplacementList,
     MisplacementRead,
     PeopleSummaryRead,
+    ProductCandidateList,
+    ProductCandidateRead,
     ProductIntelligenceList,
     ProductIntelligenceRead,
     ProductSummaryRead,
@@ -86,6 +102,8 @@ from .intelligence import (
 )
 from .journey import (
     CameraVisitedRead,
+    DailyFootfallListRead,
+    DailyFootfallRead,
     JourneyDetailRead,
     JourneyItemRead,
     JourneyListRead,
@@ -117,6 +135,11 @@ __all__ = [
     "UserRead",
     "UserUpdate",
     "UserList",
+    "AuthUserRead",
+    "ChangePasswordIn",
+    "LoginIn",
+    "LoginResponse",
+    "MessageOut",
     "CameraCreate",
     "CameraRead",
     "CameraUpdate",
@@ -130,6 +153,11 @@ __all__ = [
     "ShelfRead",
     "ShelfUpdate",
     "ShelfList",
+    "ShelfHistoryRead",
+    "ShelfSnapshotListRead",
+    "ShelfSnapshotRead",
+    "ShelfSnapshotSummaryRead",
+    "ShelfStatusCounts",
     "ProductCreate",
     "ProductRead",
     "ProductUpdate",
@@ -161,6 +189,10 @@ __all__ = [
     "BillList",
     "BillRead",
     "BillUpdate",
+    "SmsMessageList",
+    "SmsMessageRead",
+    "SmsStatusCounts",
+    "SmsStatusRead",
     "NotificationCreate",
     "NotificationList",
     "NotificationRead",
@@ -189,6 +221,8 @@ __all__ = [
     "MisplacementRead",
     "PeopleSummaryRead",
     "ProductSummaryRead",
+    "ProductCandidateList",
+    "ProductCandidateRead",
     "ProductIntelligenceList",
     "ProductIntelligenceRead",
     "ReconciliationSummaryRead",
@@ -197,6 +231,8 @@ __all__ = [
     "ShelfSummaryRead",
     "ShelfVisibleProductRead",
     "CameraVisitedRead",
+    "DailyFootfallListRead",
+    "DailyFootfallRead",
     "JourneyDetailRead",
     "JourneyItemRead",
     "JourneyListRead",

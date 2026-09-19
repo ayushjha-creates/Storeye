@@ -20,6 +20,7 @@ import { BillingPage } from './pages/Billing'
 import { ProductsPage } from './pages/Products'
 import { CustomersPage } from './pages/Customers'
 import { SettingsPage } from './pages/Settings'
+import { SettingsAdvancedPage } from './pages/SettingsAdvanced'
 import { ProductIntelligencePage } from './pages/ProductIntelligence'
 import { ShelfIntelligencePage } from './pages/ShelfIntelligence'
 import { AlertsPage } from './pages/Alerts'
@@ -55,14 +56,18 @@ function App() {
                 }
               >
                 <Route index element={<DashboardPage />} />
+                <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="live-store" element={<LiveStorePage />} />
                 <Route path="cameras" element={<CamerasPage />} />
                 <Route path="cameras/:cameraId" element={<CameraDetailPage />} />
                 <Route path="observations" element={<ObservationsPage />} />
                 <Route path="reconciliation" element={<ReconciliationPage />} />
                 <Route path="inventory" element={<InventoryPage />} />
+                <Route path="stock" element={<InventoryPage />} />
                 <Route path="inventory/receive" element={<ReceiveSmartPage />} />
+                <Route path="receive" element={<ReceiveSmartPage />} />
                 <Route path="billing" element={<BillingPage />} />
+                <Route path="sales" element={<BillingPage />} />
                 <Route path="products" element={<ProductsPage />} />
                 <Route path="customers" element={<CustomersPage />} />
                 <Route path="product-intelligence" element={<ProductIntelligencePage />} />
@@ -75,6 +80,7 @@ function App() {
                 <Route path="demo/presentation" element={<DemoPresentationPage />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="settings/advanced" element={<SettingsAdvancedPage />} />
               </Route>
               <Route path="*" element={<NotFoundPage />} />
             </Routes>

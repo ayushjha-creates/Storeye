@@ -26,7 +26,7 @@ export function jsonResponse(body: unknown, status = 200): MockResponse {
  */
 export function stubFetchRoutes(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn() as ReturnType<typeof vi.fn>
-  fetchMock.mockImplementation(async (input: string) => {
+  fetchMock.mockImplementation(async (input: string, _init?: RequestInit) => {
     const url = String(input)
     const found = Object.entries(routes).find(([key]) => url.includes(key))
     if (!found) {

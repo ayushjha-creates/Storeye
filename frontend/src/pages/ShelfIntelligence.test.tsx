@@ -26,6 +26,9 @@ const SHELVES = [
     latest_observed_at: '2026-09-07T08:00:00Z',
     mean_confidence: 0.9,
     last_analysis_message: 'AI-estimated visible occupancy from associated product detections (informational; not stock).',
+    occupancy_method: 'median_60s',
+    occupancy_samples: 4,
+    refill_recommended: false,
   },
   {
     shelf_code: 'B2',
@@ -43,6 +46,9 @@ const SHELVES = [
     latest_observed_at: null,
     mean_confidence: null,
     last_analysis_message: 'No AI data in window (camera offline or pipeline off).',
+    occupancy_method: 'raw',
+    occupancy_samples: 0,
+    refill_recommended: false,
   },
 ]
 
@@ -81,6 +87,8 @@ describe('ShelfIntelligencePage', () => {
     expect(screen.getByText('Unknown — no AI data')).toBeInTheDocument()
     expect(screen.getByText('possible misplaced')).toBeInTheDocument()
     expect(screen.getByText(/occupancy unavailable|Unavailable/)).toBeInTheDocument()
+    // Temporal smoothing is disclosed honestly, not silently applied.
+    expect(screen.getByText(/smoothed over 4 time samples/i)).toBeInTheDocument()
   })
 
   it('shows empty state when no shelf regions are configured', async () => {
@@ -96,6 +104,39 @@ describe('ShelfIntelligencePage', () => {
     )
 
     expect(await screen.findByText(/no shelf regions configured/i)).toBeInTheDocument()
+  })
+
+  it('shows a refill recommendation for an empty or low shelf', async () => {
+    const rows = [
+      {
+        ...SHELVES[0],
+        detection_status: 'LOW_VISIBLE',
+        estimated_visible_occupancy: 0.3,
+        occupied_pct: 30,
+        refill_recommended: true,
+      },
+      {
+        ...SHELVES[1],
+        shelf_code: 'C3',
+        detection_status: 'EMPTY_VISIBLE',
+        estimated_visible_occupancy: 0.0,
+        occupied_pct: 0,
+        refill_recommended: true,
+      },
+    ]
+    stubFetchRoutes({
+      '/api/stores': { items: [{ id: STORE_ID, name: 'Store' }], total: 1 },
+      '/api/intelligence/summary': SUMMARY,
+      '/api/intelligence/shelves': { items: rows, total: 2 },
+    })
+    render(
+      <MemoryRouter>
+        <ShelfIntelligencePage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText(/refill soon — about to get empty/i)).toBeInTheDocument()
+    expect(screen.getByText(/refill now — shelf appears empty/i)).toBeInTheDocument()
   })
 
   it('links to related low-shelf and misplacement open alerts', async () => {

@@ -50,6 +50,7 @@ from .product_intelligence import (
     COMP_NOT_ASSESSED,
 )
 from .shelf_intelligence import (
+    LOW_OCCUPANCY_FRACTION,
     SHELF_STATE_UNKNOWN,
     SHELF_STATE_EMPTY,
     SHELF_STATE_LOW,
@@ -92,6 +93,7 @@ __all__ = [
     "COMP_SURPLUS",
     "COMP_NO_INVENTORY",
     "COMP_NOT_ASSESSED",
+    "LOW_OCCUPANCY_FRACTION",
     "SHELF_STATE_UNKNOWN",
     "SHELF_STATE_EMPTY",
     "SHELF_STATE_LOW",

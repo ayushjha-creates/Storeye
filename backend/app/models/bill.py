@@ -2,7 +2,8 @@
 
 A bill is a persistent, manually-created billing artifact for paperless
 billing. Billing is MANUAL: the shopkeeper selects products/quantities;
-there is NO camera/AI billing. WhatsApp/SMS delivery is a later milestone.
+there is NO camera/AI billing. SMS receipt delivery (M31) is queued in the
+`sms_messages` outbox and never mutates the bill itself.
 """
 
 from __future__ import annotations

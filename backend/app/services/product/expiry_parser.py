@@ -32,10 +32,11 @@ STOREYE DATE CONVENTION
 
 from __future__ import annotations
 
+import calendar
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -51,12 +52,18 @@ _DATE_PRECISION_MONTH = "month"
 # ---------------------------------------------------------------------------
 _EXPIRY_LABELS: Dict[str, str] = {
     "EXP": "EXP",
+    "EXP.": "EXP",
+    "EXP:": "EXP",
     "EXPIRY": "EXP",
     "EXPIRY DATE": "EXP",
     "EXP DATE": "EXP",
     "EXP-DATE": "EXP",
     "USE BY": "EXP",
     "USEBY": "EXP",
+    "USE BEFORE": "EXP",
+    "CONSUME BEFORE": "EXP",
+    "BB": "EXP",
+    "B.B.": "EXP",
     "BEST BEFORE": "EXP",
     "BESTBEFORE": "EXP",
     "BEST BY": "EXP",
@@ -78,6 +85,17 @@ _MFG_LABELS: Dict[str, str] = {
     "MANUFACTURE": "MFG",
     "DATE OF MANUFACTURE": "MFG",
     "DOM": "MFG",
+    # Indian packaging standards (PKD, PACKED, etc.)
+    "PKD": "MFG",
+    "PKD.": "MFG",
+    "PKD:": "MFG",
+    "PKD ON": "MFG",
+    "PACKED": "MFG",
+    "PACKED ON": "MFG",
+    "PKG": "MFG",
+    "PKG DATE": "MFG",
+    "PACKING": "MFG",
+    "PACKING DATE": "MFG",
 }
 
 _BATCH_LABELS: Dict[str, str] = {
@@ -163,10 +181,41 @@ class ParsedProductMetadata:
 # Small regex helpers
 # ---------------------------------------------------------------------------
 _DATE_TOKEN_RE = re.compile(
-    r"(?<!\d)(\d{1,2}|\d{4})\s*[./\-]\s*(\d{1,4})(?:\s*[./\-]\s*(\d{2,4}))?(?!\d)"
+    r"(?<!\d)(\d{1,2}|\d{4})\s*[./\- ]\s*(\d{1,4})(?:\s*[./\- ]\s*(\d{2,4}))?(?!\d)"
 )
 _MONEY_RE = re.compile(r"\d{1,7}(?:[.,]\d{1,2})?")
 _BATCH_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{1,}")
+
+_MONTH_NAMES: Dict[str, int] = {
+    "JAN": 1, "JANUARY": 1,
+    "FEB": 2, "FEBRUARY": 2,
+    "MAR": 3, "MARCH": 3,
+    "APR": 4, "APRIL": 4,
+    "MAY": 5,
+    "JUN": 6, "JUNE": 6,
+    "JUL": 7, "JULY": 7,
+    "AUG": 8, "AUGUST": 8,
+    "SEP": 9, "SEPT": 9, "SEPTEMBER": 9,
+    "OCT": 10, "OCTOBER": 10,
+    "NOV": 11, "NOVEMBER": 11,
+    "DEC": 12, "DECEMBER": 12,
+}
+
+_TEXT_MONTH_3PART_RE = re.compile(
+    r"^(\d{1,2})\s*[./\- ]\s*([A-Za-z]{3,9})\s*[./\- ]\s*(\d{2,4})$"
+)
+_TEXT_MONTH_3PART_REV_RE = re.compile(
+    r"^([A-Za-z]{3,9})\s*[./\- ]\s*(\d{1,2})\s*[./\- ,]\s*(\d{2,4})$"
+)
+_TEXT_MONTH_2PART_RE = re.compile(
+    r"^([A-Za-z]{3,9})\s*[./\- ]\s*(\d{2,4})$"
+)
+
+_RELATIVE_EXPIRY_RE = re.compile(
+    r"(?:BEST\s+BEFORE|USE\s+WITHIN|USE\s+BY|CONSUME\s+WITHIN|SHELF\s+LIFE|EXPIRY|EXP)\s*[:\-]?\s*(\d{1,3})\s*(MONTHS?|DAYS?|YEARS?)"
+    r"|(\d{1,3})\s*(MONTHS?|DAYS?|YEARS?)\s+(?:FROM|OF)\s+(?:PKD|PKG|PACKAGING|PACKING|MANUFACTURE|MFD|MFG|DATE)",
+    re.IGNORECASE,
+)
 
 
 def _clean_line(raw: str) -> str:
@@ -191,9 +240,43 @@ def _parse_date(token: str) -> Optional[Tuple[date, str, List[str]]]:
 
     3-part -> DD/MM/YYYY (Storeye/India default, day precision).
     2-part where 2nd part is a 4-digit year -> MM/YYYY (month precision).
+    Also supports text months (e.g. 15-OCT-2025, 15 OCT 25, OCT 2025, OCT 15 2025).
     Anything ambiguous/unusable is rejected rather than guessed.
     """
-    m = _DATE_TOKEN_RE.fullmatch(token.strip())
+    s = token.strip()
+    # 1. Text month formats (e.g. 15-OCT-2025, 15 OCT 25, OCT 2025)
+    m_txt3 = _TEXT_MONTH_3PART_RE.match(s)
+    if m_txt3:
+        d_val, mon_str, y_val = int(m_txt3.group(1)), m_txt3.group(2).upper(), int(m_txt3.group(3))
+        if mon_str in _MONTH_NAMES and 1 <= d_val <= 31:
+            y = _normalize_year(y_val)
+            dt = _safe_date(d_val, _MONTH_NAMES[mon_str], y)
+            if dt is not None:
+                return dt, _DATE_PRECISION_DAY, []
+
+    m_txt3_rev = _TEXT_MONTH_3PART_REV_RE.match(s)
+    if m_txt3_rev:
+        mon_str, d_val, y_val = m_txt3_rev.group(1).upper(), int(m_txt3_rev.group(2)), int(m_txt3_rev.group(3))
+        if mon_str in _MONTH_NAMES and 1 <= d_val <= 31:
+            y = _normalize_year(y_val)
+            dt = _safe_date(d_val, _MONTH_NAMES[mon_str], y)
+            if dt is not None:
+                return dt, _DATE_PRECISION_DAY, []
+
+    m_txt2 = _TEXT_MONTH_2PART_RE.match(s)
+    if m_txt2:
+        mon_str, y_val = m_txt2.group(1).upper(), int(m_txt2.group(2))
+        if mon_str in _MONTH_NAMES:
+            y = _normalize_year(y_val)
+            dt = _safe_date(1, _MONTH_NAMES[mon_str], y)
+            if dt is not None:
+                return dt, _DATE_PRECISION_MONTH, [
+                    f"'{s}' read as MONTH/YEAR -> represented as {dt.isoformat()}; "
+                    "no specific day is assumed."
+                ]
+
+    # 2. Standard numeric date format
+    m = _DATE_TOKEN_RE.fullmatch(s)
     if not m:
         return None
 
@@ -229,11 +312,12 @@ def _parse_date(token: str) -> Optional[Tuple[date, str, List[str]]]:
         return dt, _DATE_PRECISION_DAY, warnings
 
     # ---- 2-part date ---------------------------------------------------
-    # Only interpret as MONTH/YEAR when the 2nd part is a 4-digit year; the
-    # first part must be a valid month (1-12). We represent it as the first
+    # Only interpret as MONTH/YEAR when the 2nd part is a 4-digit year OR
+    # a 2-digit year in the 2020-2045 window (common on Indian FMCG, e.g. "05/26");
+    # the first part must be a valid month (1-12). We represent it as the first
     # day of that month and mark month precision (we never invent a day).
-    if b >= 1000:  # second part is a real 4-digit year
-        year = _normalize_year(b)
+    if b >= 1000 or (1 <= a <= 12 and 20 <= b <= 45):
+        year = _normalize_year(b) if b < 1000 else b
         if not (1900 <= year <= 2100):
             return None
         month = a
@@ -243,7 +327,7 @@ def _parse_date(token: str) -> Optional[Tuple[date, str, List[str]]]:
             "'{0}' read as MONTH/YEAR -> represented as {1}; "
             "no specific day is assumed.".format(token, date(year, month, 1).isoformat())
         ]
-    # 2-digit second part (e.g. "12/09") is too ambiguous; do not guess.
+    # 2-digit second part not in 20-45 (e.g. "12/09") is too ambiguous; do not guess.
     return None
 
 
@@ -255,12 +339,18 @@ def _safe_date(day: int, month: int, year: int) -> Optional[date]:
 
 
 def _looks_like_date(token: str) -> bool:
-    return _DATE_TOKEN_RE.fullmatch(token.strip()) is not None
+    s = token.strip()
+    return (
+        _DATE_TOKEN_RE.fullmatch(s) is not None
+        or _TEXT_MONTH_3PART_RE.match(s) is not None
+        or _TEXT_MONTH_3PART_REV_RE.match(s) is not None
+        or _TEXT_MONTH_2PART_RE.match(s) is not None
+    )
 
 
 def _extract_date_after_labels(line: str) -> Optional[Tuple[date, str, Optional[str]]]:
     """Return (date, precision, matched_label) from a line, or None."""
-    # Scan for a label occurrence then take the following date-like token.
+    # Scan for a label occurrence then take the following date-like token(s).
     for field, vocab in _LABEL_VOCAB.items():
         if field not in ("expiry", "mfg"):
             continue
@@ -270,12 +360,13 @@ def _extract_date_after_labels(line: str) -> Optional[Tuple[date, str, Optional[
             if idx < 0:
                 continue
             rest = line[idx + len(label):].lstrip(": \t.-")
-            for candidate in rest.split():
-                cand = candidate.strip(":,\u20b9()[]")
-                parsed = _parse_date(cand)
-                if parsed is not None:
-                    return parsed[0], parsed[1], canonical
-            # no date on same line -> try the immediate next tokens failed above
+            tokens = _split_tokens(rest)
+            for w in (3, 2, 1):
+                for i in range(len(tokens) - w + 1):
+                    cand = " ".join(tokens[i : i + w]).strip(":,\u20b9()[]")
+                    parsed = _parse_date(cand)
+                    if parsed is not None:
+                        return parsed[0], parsed[1], canonical
             return None
     return None
 
@@ -353,6 +444,10 @@ class ExpiryParser:
                 if val is not None:
                     _apply(result, fkey, val, lines[base_i + 1])
 
+        # Relative expiry fallback: e.g. "BEST BEFORE 6 MONTHS FROM PACKAGING / PKD"
+        if result.expiry_date is None and result.manufacturing_date is not None:
+            _infer_relative_expiry(result, raw_text)
+
         return result
 
     # ------------------------------------------------------------------
@@ -424,11 +519,12 @@ def _resolve_value(fkey: str, rest_tokens) -> Optional[Any]:
         return None
 
     if fkey in ("expiry", "mfg"):
-        for t in tokens:
-            cand = t.strip(":,\u20b9()[]")
-            parsed = _parse_date(cand)
-            if parsed is not None:
-                return parsed
+        for w in (3, 2, 1):
+            for i in range(len(tokens) - w + 1):
+                cand = " ".join(tokens[i : i + w]).strip(":,\u20b9()[]")
+                parsed = _parse_date(cand)
+                if parsed is not None:
+                    return parsed
         return None
 
     if fkey == "batch":
@@ -508,6 +604,53 @@ def _apply(result: ParsedProductMetadata, fkey: str, val: Any, line: str) -> Non
             result.mrp = Decimal(val)
         else:
             result.warnings.append(f"Duplicate MRP on line '{line}'; kept first.")
+
+
+def _add_months(d: date, months: int) -> date:
+    year = d.year + (d.month + months - 1) // 12
+    month = (d.month + months - 1) % 12 + 1
+    max_days = calendar.monthrange(year, month)[1]
+    day = min(d.day, max_days)
+    return date(year, month, day)
+
+
+def _infer_relative_expiry(result: ParsedProductMetadata, raw_text: str) -> None:
+    if result.manufacturing_date is None:
+        return
+    m = _RELATIVE_EXPIRY_RE.search(raw_text)
+    if not m:
+        return
+    if m.group(1) and m.group(2):
+        count_str, unit_str = m.group(1), m.group(2)
+    elif m.group(3) and m.group(4):
+        count_str, unit_str = m.group(3), m.group(4)
+    else:
+        return
+
+    try:
+        count = int(count_str)
+    except ValueError:
+        return
+
+    unit = unit_str.upper()
+    if unit.startswith("MONTH"):
+        expiry = _add_months(result.manufacturing_date, count)
+        precision = _DATE_PRECISION_MONTH
+    elif unit.startswith("DAY"):
+        expiry = result.manufacturing_date + timedelta(days=count)
+        precision = _DATE_PRECISION_DAY
+    elif unit.startswith("YEAR"):
+        expiry = _add_months(result.manufacturing_date, count * 12)
+        precision = _DATE_PRECISION_MONTH
+    else:
+        return
+
+    result.expiry_date = expiry
+    result.expiry_date_precision = precision
+    result.warnings.append(
+        f"Expiry calculated as {count} {unit.lower()} from manufacturing date "
+        f"({result.manufacturing_date.isoformat()})."
+    )
 
 
 def parse(source: Union[str, Any]) -> ParsedProductMetadata:

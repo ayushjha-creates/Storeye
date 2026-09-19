@@ -1,16 +1,14 @@
-// Authentication foundation for Storeye frontend.
+// Real authentication for the Storeye frontend.
 //
-// IMPORTANT LIMITATION (documented):
-//   The M11 FastAPI backend does NOT yet implement authentication. There is no
-//   /api/auth/login endpoint and no user/password verification. This module is a
-//   UI-level foundation ONLY:
-//     - it gates protected routes and redirects to /login
-//     - it persists a session in localStorage so refresh keeps you signed in
-//     - it exposes `authenticate()` which WILL call the real backend auth
-//       endpoint once it exists (M13+); today it only checks that the local
-//       Edge Hub is reachable, then records a local session.
-//   Frontend-only auth does NOT provide backend security. Until real auth
-//   exists, the API is open at the network layer; nothing here changes that.
+// The backend (FastAPI) owns authentication: it issues an HttpOnly session
+// cookie on login and validates it on every request. This context is a thin,
+// honest wrapper around that API:
+//   - on load it calls GET /api/auth/me to restore the session from the cookie
+//   - login/logout/change-password/logout-all call the real endpoints
+//   - nothing secret is ever written to localStorage
+//
+// Security lives on the server (sessions, Argon2id, RBAC, store isolation);
+// this layer only reflects the authenticated user in the UI.
 
 import React, {
   createContext,
@@ -20,107 +18,122 @@ import React, {
   useMemo,
   useState,
 } from 'react'
-import { healthApi } from '../lib/api/zone'
-import { setAuthToken } from '../lib/api/client'
-import { DEMO } from '../config/demo'
+import { authApi, type AuthUser } from '../lib/api/auth'
 
 export interface AuthSession {
-  /** Placeholder identity. Will be replaced by backend-issued values once real auth exists. */
+  /** Backend user id. */
+  userId: string
+  email: string | null
+  /** Display name shown across the app (AppShell, Settings). */
   userName: string
   role: string
+  storeId: string
+  storeName: string | null
   loginAt: string
-  /** True when signed in with the public demo account (M18 showcase mode). */
+  /** True when the signed-in store is the local showcase store. */
   demo?: boolean
 }
 
-const SESSION_KEY = 'storeye.auth.session'
-const DEMO_USER = 'Store Manager'
-
-function isDemoCredential(username: string, password: string): boolean {
-  return username.trim().toLowerCase() === DEMO.email.toLowerCase() && password === DEMO.password
+function toSession(user: AuthUser): AuthSession {
+  return {
+    userId: user.id,
+    email: user.email,
+    userName: user.name,
+    role: user.role,
+    storeId: user.store_id,
+    storeName: user.store_name,
+    loginAt: new Date().toISOString(),
+    demo: user.demo_store,
+  }
 }
 
 interface AuthContextValue {
   session: AuthSession | null
   isAuthenticated: boolean
   isDemo: boolean
-  /** Signs the user in. Returns true on success, throws ApiError/NetworkError on failure. */
-  login: (username: string, password: string) => Promise<boolean>
-  logout: () => void
-  /** Verified only when a real backend JWT is present; a no-op gate today. */
-  apiToken: string | null
+  /** True while the initial session restore (GET /api/auth/me) is in flight. */
+  isLoading: boolean
+  /** Role-level helper. OWNER=3, MANAGER=2, STAFF=1. */
+  hasRole: (min: 'OWNER' | 'MANAGER' | 'STAFF') => boolean
+  /** True when the signed-in user is an OWNER or MANAGER (advanced areas). */
+  canManage: boolean
+  /** Signs the user in. Throws ApiError/NetworkError on failure. */
+  login: (email: string, password: string) => Promise<void>
+  logout: () => Promise<void>
+  logoutAll: () => Promise<void>
+  changePassword: (currentPassword: string, newPassword: string, confirm: string) => Promise<string>
 }
+
+const ROLE_LEVEL: Record<string, number> = { OWNER: 3, MANAGER: 2, STAFF: 1 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function loadSession(): AuthSession | null {
-  if (typeof window === 'undefined') return null
-  const raw = window.localStorage.getItem(SESSION_KEY)
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as AuthSession
-  } catch {
-    return null
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<AuthSession | null>(() => loadSession())
-  const [apiToken] = useState<string | null>(
-    () => (typeof window !== 'undefined' && window.localStorage.getItem('storeye.auth.token')) || null,
-  )
+  const [session, setSession] = useState<AuthSession | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  const login = useCallback(async (username: string, password: string) => {
-    // REAL AUTH HOOK POINT (M13+): replace this block with a call to the
-    // backend `/api/auth/login` that returns { access_token, user }.
-    // For now ensure the local Edge Hub (FastAPI) is reachable, then record a
-    // local session. Passing a fake JWT here would be dishonest, so we keep
-    // apiToken null until real auth exists.
-    await healthApi.health()
-
-    const demo = DEMO.enabled && isDemoCredential(username, password)
-    const next: AuthSession = {
-      userName: demo ? DEMO.userName : username.trim() || DEMO_USER,
-      role: demo ? DEMO.role : 'ASSOCIATE',
-      loginAt: new Date().toISOString(),
-      demo,
-    }
-    setSession(next)
-    try {
-      window.localStorage.setItem(SESSION_KEY, JSON.stringify(next))
-    } catch {
-      // Storage may be unavailable (private mode); session stays in memory.
-    }
-    return true
-  }, [])
-
-  const logout = useCallback(() => {
-    setSession(null)
-    setAuthToken(null)
-    try {
-      window.localStorage.removeItem(SESSION_KEY)
-    } catch {
-      // ignore
-    }
-  }, [])
-
-  // On first load, sync the stored token into the client so the Authorization
-  // header is sent once real auth exists.
+  // Restore the session from the HttpOnly cookie on first load.
   useEffect(() => {
-    const stored = window.localStorage.getItem('storeye.auth.token')
-    setAuthToken(stored)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const user = await authApi.me()
+        if (!cancelled) setSession(toSession(user))
+      } catch {
+        // No cookie / expired / backend offline -> stay signed out.
+        if (!cancelled) setSession(null)
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
+
+  const login = useCallback(async (email: string, password: string) => {
+    const { user } = await authApi.login(email.trim(), password)
+    setSession(toSession(user))
+  }, [])
+
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout()
+    } finally {
+      setSession(null)
+    }
+  }, [])
+
+  const logoutAll = useCallback(async () => {
+    try {
+      await authApi.logoutAll()
+    } finally {
+      setSession(null)
+    }
+  }, [])
+
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string, confirm: string) => {
+      const { message } = await authApi.changePassword(currentPassword, newPassword, confirm)
+      return message
+    },
+    [],
+  )
 
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
       isAuthenticated: session != null,
       isDemo: session?.demo === true,
+      hasRole: (min) => (session != null ? (ROLE_LEVEL[session.role] ?? 0) >= (ROLE_LEVEL[min] ?? 0) : false),
+      canManage: session != null ? (ROLE_LEVEL[session.role] ?? 0) >= ROLE_LEVEL.MANAGER : false,
+      isLoading,
       login,
       logout,
-      apiToken,
+      logoutAll,
+      changePassword,
     }),
-    [session, login, logout, apiToken],
+    [session, isLoading, login, logout, logoutAll, changePassword],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -37,7 +37,7 @@ def clear_settings():
 
 @pytest.mark.no_db
 def test_alembic_head_is_known():
-    assert expected_alembic_head() == "19c835a1a344"
+    assert expected_alembic_head() == "e7a3c5f1b2d8"
 
 
 @pytest.mark.no_db
@@ -68,7 +68,7 @@ def test_runtime_probe_reaches_postgres(clear_settings, monkeypatch):
     report = assess_runtime(skip_in_tests=False)
     assert report.database_configured is True
     assert report.database_reachable is True
-    assert report.migration_head == "19c835a1a344"
+    assert report.migration_head == "e7a3c5f1b2d8"
 
 
 @pytest.mark.pg

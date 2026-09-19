@@ -94,3 +94,67 @@ def client():
 
     with TestClient(app) as c:
         yield c
+
+
+# ---------------------------------------------------------------------------
+# Authentication test helpers
+#
+# Business routers now require an authenticated user whose `store_id` scopes
+# every read/write. Tests exercise the HTTP layer against a real PostgreSQL
+# schema; rather than driving the login flow for every test we bind a fake
+# authenticated user to the store under test by overriding `get_current_user`.
+# This keeps the authorization plumbing (require_role / authz helpers) live
+# while removing cookie/session setup noise from domain tests. Login, logout,
+# session expiry and CSRF are covered directly in test_authentication.py.
+# ---------------------------------------------------------------------------
+
+class FakeUser:
+    """Minimal stand-in for an authenticated `User` row (store_id + role)."""
+
+    def __init__(self, store_id, role: str = "OWNER"):
+        import uuid
+
+        self.id = uuid.uuid4()
+        self.store_id = store_id
+        self.role = role
+        self.is_active = True
+        self.name = "Test User"
+        self.email = "test-user@storeye.local"
+
+
+def make_store(session_factory, name: str, **kwargs):
+    """Create a Store row directly in the test database and return it."""
+    from app.models import Store
+
+    session = session_factory()
+    try:
+        store = Store(name=name, **kwargs)
+        session.add(store)
+        session.commit()
+        session.refresh(store)
+        store_id = store.id
+        store_name = store.name
+    finally:
+        session.close()
+
+    from types import SimpleNamespace
+
+    return SimpleNamespace(id=store_id, name=store_name)
+
+
+def bind_test_user(store_id, role: str = "OWNER"):
+    """Authenticate subsequent requests on the global TestClient as a user of
+    `store_id` with `role`. Returns the bound FakeUser."""
+    from app.api.deps import get_current_user
+    from app.main import app
+
+    user = FakeUser(store_id, role)
+    app.dependency_overrides[get_current_user] = lambda: user
+    return user
+
+
+def unbind_test_user():
+    from app.api.deps import get_current_user
+    from app.main import app
+
+    app.dependency_overrides.pop(get_current_user, None)

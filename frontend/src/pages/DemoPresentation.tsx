@@ -32,10 +32,10 @@ import {
 const LINKS: { label: string; to: string; icon: (p: { className?: string }) => ReactNode }[] = [
   { label: 'Open Dashboard', to: '/app', icon: IconDashboard },
   { label: 'Open Live Store', to: '/app/live-store', icon: IconStore },
-  { label: 'Open Inventory', to: '/app/inventory', icon: IconBox },
+  { label: 'Open Stock', to: '/app/stock', icon: IconBox },
   { label: 'Open Alerts', to: '/app/alerts', icon: IconAlert },
-  { label: 'Open Journeys', to: '/app/journeys', icon: IconRoute },
-  { label: 'Open Smart Receiving', to: '/app/inventory/receive', icon: IconScan },
+  { label: 'Open Journeys', to: '/app/settings/advanced', icon: IconRoute },
+  { label: 'Open Receive Stock', to: '/app/receive', icon: IconScan },
   { label: 'Open Insights', to: '/app/insights', icon: IconLightbulb },
 ]
 

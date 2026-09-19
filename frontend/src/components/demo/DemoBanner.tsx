@@ -32,6 +32,10 @@ export function DemoBanner() {
   if (!presentation) return null
 
   const reset = async () => {
+    const ok = window.confirm(
+      'Reset the demo store to its baseline? This only affects the deterministic demo data.',
+    )
+    if (!ok) return
     setBusy(true)
     try {
       await demoApi.reset()

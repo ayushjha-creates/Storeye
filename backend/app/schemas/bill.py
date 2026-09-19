@@ -1,7 +1,8 @@
 """Pydantic schemas for Bill and BillItem.
 
 Billing is MANUAL. A Bill is created explicitly by the shopkeeper; there is
-no camera/AI billing. Digital delivery (WhatsApp/SMS) is a later milestone.
+no camera/AI billing. SMS receipt delivery (M31) is automatic and best-effort
+— it never touches the bill itself.
 """
 
 from __future__ import annotations

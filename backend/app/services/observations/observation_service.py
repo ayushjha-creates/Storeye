@@ -227,12 +227,18 @@ class ObservationService:
         observed_at: Optional[datetime] = None,
         source: Optional[str] = None,
         camera_id: Optional[UUID] = None,
+        product_id: Optional[UUID] = None,
+        details_extra: Optional[dict] = None,
     ) -> Observation:
         """Record parsed product metadata as a fact.
 
         This NEVER creates or updates a Batch. Batch creation is an explicit
         business operation (BatchService.create_batch). Here we only persist
         that the expiry parser observed this metadata.
+
+        `product_id` and `details_extra` let the camera OCR path attach a
+        conservatively-matched catalog product (name/price) to the read. They
+        are optional and never fabricate a match.
         """
         details: dict = {}
         if expiry_date is not None:
@@ -247,11 +253,15 @@ class ObservationService:
             details["mrp"] = str(mrp)
         if warnings:
             details["warnings"] = list(warnings)
+        for key, value in (details_extra or {}).items():
+            if value is not None:
+                details[key] = value
 
         return self.record_observation(
             observation_type=OBS_EXPIRY_METADATA,
             store_id=store_id,
             camera_id=camera_id,
+            product_id=product_id,
             source=source,
             confidence=confidence,
             text=raw_text,
@@ -517,6 +527,39 @@ class ObservationService:
             "last_observed_at": last_observed_at,
             "activity": buckets,
         }
+
+    # ------------------------------------------------------------------
+    # Retention (M29)
+    # ------------------------------------------------------------------
+    def purge_person_observations(
+        self,
+        *,
+        store_id: UUID,
+        retention_hours: int = 24,
+        now: Optional[datetime] = None,
+    ) -> int:
+        """Delete PER-FRAME PERSON observation rows older than the diagnostic
+        window. This is the M29 "no per-frame person history forever" guard:
+        the hot person cache + journey aggregates carry the analytics; PERSON
+        observation rows are at most a short debugging window.
+
+        NEVER touches PRODUCT/TEXT/EXPIRY_METADATA observations and never
+        touches any business table. Returns the number of rows deleted.
+        """
+        if retention_hours < 1:
+            raise ValueError("retention_hours must be >= 1")
+        cutoff = (now or datetime.now(timezone.utc)) - timedelta(
+            hours=int(retention_hours)
+        )
+        result = self.session.execute(
+            Observation.__table__.delete().where(
+                Observation.store_id == store_id,
+                Observation.observation_type == OBS_PERSON,
+                Observation.observed_at < cutoff,
+            )
+        )
+        self.session.commit()
+        return result.rowcount or 0
 
     # ------------------------------------------------------------------
     # Helpers

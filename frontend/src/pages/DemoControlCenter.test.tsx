@@ -83,10 +83,13 @@ function routes(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   window.localStorage.clear()
+  // Destructive demo actions are confirmation-gated; accept by default.
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   window.localStorage.clear()
 })
 
@@ -142,6 +145,22 @@ describe('DemoControlCenterPage', () => {
     expect(
       fetchMock.mock.calls.some((c) => String(c[0]).includes('/api/demo/reset')),
     ).toBe(true)
+  })
+
+  it('does not reset or activate when the confirmation is declined', async () => {
+    const fetchMock = stubFetchRoutes(routes())
+    vi.mocked(window.confirm).mockReturnValue(false)
+    render(
+      <MemoryRouter>
+        <DemoControlCenterPage />
+      </MemoryRouter>,
+    )
+
+    await userEvent.click(await screen.findByRole('button', { name: /activate low stock/i }))
+    await userEvent.click(screen.getByRole('button', { name: /reset to normal/i }))
+
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/activate'))).toBe(false)
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/api/demo/reset'))).toBe(false)
   })
 
   it('toggles presentation mode and persists the preference', async () => {

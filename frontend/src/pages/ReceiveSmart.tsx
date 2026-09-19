@@ -94,6 +94,7 @@ export function ReceiveSmartPage() {
   const [queuingDemo, setQueuingDemo] = useState(false)
   const [demoProduct, setDemoProduct] = useState('aashirvaad')
   const [activeIntakeJob, setActiveIntakeJob] = useState<string | null>(null)
+  const [jobPhotoUrl, setJobPhotoUrl] = useState<string | null>(null)
 
   // Editable candidate fields (prefilled after scan, always editable).
   const [productId, setProductId] = useState('')
@@ -156,6 +157,13 @@ export function ReceiveSmartPage() {
     }
   }, [imageUrl])
 
+  // Clean up the USB-intake review photo object URL.
+  useEffect(() => {
+    return () => {
+      if (jobPhotoUrl) URL.revokeObjectURL(jobPhotoUrl)
+    }
+  }, [jobPhotoUrl])
+
   const pickFile = (f: File | undefined) => {
     if (!f) return
     if (imageUrl) URL.revokeObjectURL(imageUrl)
@@ -203,7 +211,7 @@ export function ReceiveSmartPage() {
 
   // M25: a USB-copied photo was already scanned by the edge watcher; load its
   // candidate into the same review form. The photo bytes never reach the browser.
-  const openIntakeJob = (job: MobileIntakeJob) => {
+  const openIntakeJob = async (job: MobileIntakeJob) => {
     if (!job.candidate) {
       setIntakeError(`Job ${job.filename} has no readable candidate.`)
       return
@@ -223,6 +231,30 @@ export function ReceiveSmartPage() {
     setQuantity('')
     setActiveIntakeJob(job.job_id)
     setIntakeError(null)
+    // Best-effort: show the on-disk photo the watcher received (never uploaded).
+    if (jobPhotoUrl) URL.revokeObjectURL(jobPhotoUrl)
+    setJobPhotoUrl(null)
+    if (job.photo_url) {
+      try {
+        setJobPhotoUrl(await mobileIntakeApi.photoBlobUrl(job.job_id))
+      } catch {
+        // Photo is a convenience for review, never required to proceed.
+      }
+    }
+  }
+
+  // M27: a FAILED photo can be re-scanned without re-copying it from the phone.
+  const rescanJob = async (jobId: string) => {
+    setIntakeError(null)
+    setIntakeNote(null)
+    try {
+      await mobileIntakeApi.rescan(jobId)
+      const jobs = await mobileIntakeApi.jobs()
+      setIntakeJobs(jobs.items)
+      setIntakeNote('Rescan complete — review the updated candidate.')
+    } catch (err) {
+      setIntakeError(err instanceof Error ? err.message : 'Rescan failed.')
+    }
   }
 
   const queueDemoPackage = async () => {
@@ -260,9 +292,22 @@ export function ReceiveSmartPage() {
         expiry_date_precision: expiryPrecision || 'day',
         mrp: mrp ? String(mrp) : null,
         reference: null,
+        barcode: candidate?.barcode || null,
       })
       setReceipt(res)
       setStage('done')
+      // M27: after the real M17 confirm wrote the data, close the USB job so it
+      // leaves the review queue. Book-keeping only — never a DB mutation here.
+      if (activeIntakeJob) {
+        try {
+          await mobileIntakeApi.close(activeIntakeJob)
+          const jobs = await mobileIntakeApi.jobs()
+          setIntakeJobs(jobs.items)
+        } catch {
+          // Non-fatal: the receipt is committed; the job can still be closed.
+        }
+        setActiveIntakeJob(null)
+      }
     } catch (err) {
       setConfirmError(err)
       setStage('review')
@@ -277,6 +322,8 @@ export function ReceiveSmartPage() {
     setConfirmError(null)
     setReceipt(null)
     setQuantity('')
+    setActiveIntakeJob(null)
+    setJobPhotoUrl(null)
     setStage('capture')
   }
 
@@ -288,20 +335,19 @@ export function ReceiveSmartPage() {
     <div className="page-shell space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-bold">Smart Batch Receiving</h1>
+          <h1 className="font-bold">Receive Stock</h1>
           <p className="mt-0.5 text-sm text-black">
-            Close-up package capture → local barcode + OCR → edit → human-confirmed
-            receipt. Nothing is committed until you confirm.
+            Turn a photo of the package into stock. Nothing is added until you confirm the details.
           </p>
         </div>
-        <Link to="/app/inventory" className="text-xs font-medium text-brand-700 hover:underline">
-          ← Inventory
+        <Link to="/app/stock" className="text-xs font-medium text-brand-700 hover:underline">
+          ← Stock
         </Link>
       </div>
 
       <Card
-        title="Mobile Capture · USB intake"
-        subtitle="Photos copied from your phone over USB are decoded automatically on this edge node — nothing reaches the cloud"
+        title="Scan with your phone"
+        subtitle="Take a photo of the package with your phone camera, or copy a photo over USB — Storeye reads it on your computer, offline"
       >
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
@@ -341,15 +387,26 @@ export function ReceiveSmartPage() {
                           : (job.reason ?? job.error ?? job.state)}
                       </p>
                     </div>
-                    {job.state === 'REVIEW_REQUIRED' ? (
-                      <Button
-                        kind="secondary"
-                        onClick={() => openIntakeJob(job)}
-                        disabled={activeIntakeJob === job.job_id}
-                      >
-                        {activeIntakeJob === job.job_id ? 'Loaded' : 'Review candidate'}
-                      </Button>
-                    ) : null}
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {job.state === 'REVIEW_REQUIRED' ? (
+                        <Button
+                          kind="secondary"
+                          onClick={() => openIntakeJob(job)}
+                          disabled={activeIntakeJob === job.job_id}
+                        >
+                          {activeIntakeJob === job.job_id ? 'Loaded' : 'Review candidate'}
+                        </Button>
+                      ) : null}
+                      {job.state === 'FAILED' ? (
+                        <Button
+                          kind="secondary"
+                          onClick={() => rescanJob(job.job_id)}
+                          aria-label={`Rescan ${job.filename}`}
+                        >
+                          <IconRefresh className="mr-1 inline-block h-3.5 w-3.5" /> Rescan
+                        </Button>
+                      ) : null}
+                    </div>
                   </li>
                 ))}
             </ul>
@@ -380,7 +437,10 @@ export function ReceiveSmartPage() {
               {activeIntakeJob ? (
                 <button
                   type="button"
-                  onClick={() => setActiveIntakeJob(null)}
+                  onClick={() => {
+                    setActiveIntakeJob(null)
+                    setJobPhotoUrl(null)
+                  }}
                   className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
                 >
                   <IconRefresh className="h-3.5 w-3.5" /> Clear active job
@@ -453,6 +513,7 @@ export function ReceiveSmartPage() {
                 ref={fileRef}
                 type="file"
                 accept="image/*"
+                capture="environment"
                 className="hidden"
                 data-testid="package-file-input"
                 onChange={(e) => pickFile(e.target.files?.[0])}
@@ -506,14 +567,39 @@ export function ReceiveSmartPage() {
               ) : null}
 
               {scanError ? (
-                <div className="rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                  <p className="font-medium">Unable to confidently read package information.</p>
-                  <p className="mt-1">Retake a flat, well-lit, close-up photo — or enter the values manually.</p>
-                  <p className="mt-1 text-red-700/70 text-xs">{String((scanError as Error).message ?? scanError)}</p>
+                <div className="rounded-lg border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                  {Boolean(
+                    (scanError as { status?: number })?.status === 401 ||
+                    String((scanError as Error)?.message || scanError).includes('Not authenticated')
+                  ) ? (
+                    <div>
+                      <p className="font-semibold text-red-800 dark:text-red-200">Session expired or not signed in</p>
+                      <p className="mt-1 text-xs">Please sign in to your store account to scan packages and update stock.</p>
+                      <Link
+                        to="/login?from=/app/receive"
+                        className="mt-2 inline-block rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+                      >
+                        Sign in to continue
+                      </Link>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="font-medium">Unable to confidently read package information.</p>
+                      <p className="mt-1">Retake a flat, well-lit, close-up photo — or enter the values manually.</p>
+                      <p className="mt-1 text-xs opacity-75">{String((scanError as Error).message ?? scanError)}</p>
+                    </>
+                  )}
                 </div>
               ) : null}
 
               <Card title="2 · Review & confirm" subtitle="All fields are editable before anything is committed">
+                {activeIntakeJob && jobPhotoUrl ? (
+                  <img
+                    src={jobPhotoUrl}
+                    alt="Photo received over USB intake"
+                    className="mb-4 h-48 w-full rounded-lg border border-gray-200 object-contain sm:w-72"
+                  />
+                ) : null}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label="Product">
                     <select

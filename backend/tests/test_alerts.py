@@ -37,6 +37,7 @@ from app.models import (
     ALERT_LOW_SHELF_OCCUPANCY,
     ALERT_MISPLACEMENT,
     ALERT_REVIEW_REQUIRED,
+    ALERT_SHELF_EMPTY,
     ALERT_SHORTAGE,
     ALERT_SURPLUS,
     Alert,
@@ -72,6 +73,7 @@ from app.services.alerts import (
     ValidationError,
 )
 from app.services.observations import ObservationService
+from tests.conftest import bind_test_user
 
 pytestmark = pytest.mark.pg
 
@@ -120,7 +122,16 @@ def store(db) -> Store:
     db.add(s)
     db.commit()
     db.refresh(s)
+    # Authenticate HTTP calls in this module as an OWNER of this store.
+    bind_test_user(s.id)
     return s
+
+
+@pytest.fixture(autouse=True)
+def _reset_auth_overrides():
+    yield
+    from app.main import app
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture()
@@ -436,9 +447,40 @@ def test_low_shelf_occupancy_alert(db, store, camera, shelf):
     assert res.generated >= 1
     assert len(lows) == 1
     assert lows[0].shelf_id == shelf.id
-    assert lows[0].severity == SEV_MEDIUM  # pct < 15
+    assert lows[0].severity == SEV_HIGH  # < 15% of the shelf visible
     assert lows[0].details["occupied_pct"] == 4.0
     assert lows[0].details["detection_status"] == "LOW_VISIBLE"
+    assert lows[0].details["recommended_action"] == "refill_soon"
+    assert "about to get empty" in (lows[0].title or "").lower()
+
+
+def test_shelf_empty_alert_refill_now(db, store, camera):
+    # Camera has AI data in A1 only; region B2 is empty -> CRITICAL refill alert.
+    _record_product(db, store, camera, "Lays", bbox=[0, 0, 20, 20], conf=0.9)
+    res = AlertRuleEngine(db).evaluate(store_id=store.id)
+    empties = _alerts_of(db, ALERT_SHELF_EMPTY, store.id)
+    assert len(empties) == 1
+    assert empties[0].severity == SEV_CRITICAL
+    assert empties[0].details["shelf_code"] == "B2"
+    assert empties[0].details["detection_status"] == "EMPTY_VISIBLE"
+    assert empties[0].details["occupied_pct"] == 0.0
+    assert empties[0].details["recommended_action"] == "refill_now"
+    assert "empty" in (empties[0].title or "").lower()
+    assert res.generated >= 1
+
+
+def test_shelf_fill_alerts_after_reconciliation(db, store, camera):
+    # `evaluate_shelf_fill` is what the reconciliation run invokes. It must
+    # produce the refill alerts and tag the reconciliation trigger.
+    _record_product(db, store, camera, "Lays", bbox=[0, 0, 20, 20], conf=0.9)
+    res = AlertRuleEngine(db).evaluate_shelf_fill(
+        store_id=store.id, trigger="reconciliation"
+    )
+    assert res.generated >= 2  # one EMPTY (B2) + one LOW (A1)
+    low = _alerts_of(db, ALERT_LOW_SHELF_OCCUPANCY, store.id)[0]
+    empty = _alerts_of(db, ALERT_SHELF_EMPTY, store.id)[0]
+    assert low.details["trigger"] == "reconciliation"
+    assert empty.details["trigger"] == "reconciliation"
 
 
 def test_unknown_shelf_is_never_an_alert(db, store):
@@ -863,6 +905,24 @@ def test_api_evaluate_never_mutates_inventory(db, client, store, plain_camera, p
     assert _count(db, Sale) == before["sales"]
     db.refresh(inv)
     assert inv.quantity == 6
+
+
+def test_api_reconciliation_run_triggers_shelf_fill_alerts(db, client, store, camera, product):
+    _record_product(db, store, camera, "Lays", bbox=[0, 0, 20, 20], conf=0.9)
+    body = {
+        "store_id": str(store.id),
+        "start": (_now() - timedelta(hours=1)).isoformat(),
+        "end": (_now() + timedelta(hours=1)).isoformat(),
+    }
+    r = client.post("/api/reconciliation/run", json=body)
+    assert r.status_code == 201, r.text
+
+    empties = _alerts_of(db, ALERT_SHELF_EMPTY, store.id)
+    lows = _alerts_of(db, ALERT_LOW_SHELF_OCCUPANCY, store.id)
+    assert len(empties) == 1 and empties[0].severity == SEV_CRITICAL
+    assert empties[0].details["trigger"] == "reconciliation"
+    assert len(lows) == 1
+    assert lows[0].details["trigger"] == "reconciliation"
 
 
 def test_api_list_filtering_status_and_pagination(db, client, store, product, camera):

@@ -42,70 +42,27 @@
     animation: page-in 260ms ease-out;
   }
   .card {
-    @apply rounded-card border border-gray-200 bg-surface-200 shadow-sm;
-    color: #1e3a8a;
+    @apply rounded-xl border border-gray-200/90 bg-white shadow-sm;
   }
   .card-hover {
-    @apply transition-all duration-200 hover:-translate-y-px hover:border-gray-300 hover:shadow-md;
-  }
-  /* Blue text inside the white boxes — remap the neutral grays to brand
-     blue, while semantic tones (amber/emerald/red…) keep their meaning. */
-  .card .text-gray-100,
-  .card .text-gray-200,
-  .card .text-gray-300,
-  .card .text-gray-400 {
-    @apply text-brand-400;
-  }
-  .card .text-gray-500 {
-    @apply text-brand-500;
-  }
-  .card .text-gray-600 {
-    @apply text-brand-600;
-  }
-  .card .text-gray-700 {
-    @apply text-brand-700;
-  }
-  .card .text-gray-800,
-  .card .text-gray-900 {
-    @apply text-brand-800;
-  }
-  .card input,
-  .card select,
-  .card textarea {
-    @apply text-brand-700;
-  }
-  .card .fill-gray-300,
-  .card .fill-gray-400,
-  .card .fill-gray-500,
-  .card .fill-gray-600 {
-    fill: #3b82f6;
-  }
-  .card .fill-gray-700,
-  .card .fill-gray-800,
-  .card .fill-gray-900 {
-    fill: #1e40af;
-  }
-  .card .btn-secondary {
-    @apply text-brand-700;
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md;
   }
   .surface-alt {
-    @apply rounded-xl border border-gray-200 bg-gray-50;
+    @apply rounded-xl border border-gray-200/80 bg-gray-50/70;
   }
-  /* Page titles are black on the white workspace background;
-     section headings inside white cards keep the blue accent. */
   .page-shell h1 {
-    @apply text-black;
+    @apply text-gray-900 font-bold tracking-tight;
   }
   .page-shell h2,
   .page-shell h3,
   .page-shell h4 {
-    @apply text-brand-800;
+    @apply text-gray-900 font-semibold tracking-tight;
   }
   .table-base th {
-    @apply bg-transparent px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-500;
+    @apply bg-gray-50/80 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-gray-200;
   }
   .table-base td {
-    @apply px-4 py-2.5 text-sm text-gray-600;
+    @apply px-4 py-3 text-sm text-gray-700;
   }
   .table-base thead tr {
     @apply border-b border-gray-200;
@@ -114,21 +71,21 @@
     @apply border-b border-gray-100 transition-colors last:border-0;
   }
   .table-base tbody tr:hover {
-    @apply bg-gray-50;
+    @apply bg-gray-50/80;
   }
   .table-base tbody tr:hover td {
     @apply text-gray-900;
   }
   /* Primary CTA button */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-brand-500 hover:shadow-glow disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-brand-500 hover:shadow-sm active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400;
   }
   /* Secondary — white surface with thin border */
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-all duration-200 hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-all duration-200 hover:bg-gray-50 hover:text-gray-900 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .text-accent-gradient {
-    @apply bg-gradient-to-r from-brand-400 via-brand-300 to-cyan-300 bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-brand-600 via-brand-500 to-cyan-500 bg-clip-text text-transparent;
   }
 }
 

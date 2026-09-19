@@ -31,11 +31,50 @@ class PipelineConfig:
     product_detection: bool = True
     ocr: bool = False
 
+    # ---------------------------------------------------------------------
+    # Product model selection (M32 open-vocabulary product detection).
+    # "world"  -> Ultralytics YOLO-World: text-prompted zero-shot detection of
+    #             the store's own products (see `product_prompts`).
+    # "shelf"  -> the legacy fine-tuned 55-class FMCG checkpoint.
+    # The open-vocabulary path needs at least one prompt; with no prompts the
+    # product tap is a concrete no-op (it never invents classes).
+    # ---------------------------------------------------------------------
+    product_detector: str = "world"
+    product_prompts: List[str] = field(default_factory=list)
+
     # Inference cadence: process every `inference_interval`-th frame for the
     # detection models (person + product). Occlusion/skips favour latest frame.
     inference_interval: int = 1  # 1 => every frame
     # OCR is expensive: only run when the running frame index hits this stride.
     ocr_interval: int = 30  # 0 disables OCR regardless of `ocr` flag
+
+    # ---------------------------------------------------------------------
+    # M30 periodic shelf-occupancy monitoring (decouples product YOLO from
+    # the live person loop). Both are WALL-CLOCK cadences, not frame strides,
+    # so a 30 fps live feed and a 3 fps one produce the same fill history.
+    #
+    # `product_scan_interval_seconds`: minimum seconds between PRODUCT YOLO
+    # runs (feeds both the product observation tap AND the shelf snapshots).
+    # 0 keeps the legacy behaviour: run the product tap EVERY frame (same
+    # convention as `inference_interval`).
+    #
+    # `shelf_snapshot_interval_seconds`: minimum seconds between full shelf
+    # occupancy snapshots (`ShelfSnapshot` rows + on-disk images). 0 disables
+    # shelf monitoring. Each cadence is independent: set product cadence 0 to
+    # keep per-frame product detections while still getting 30 s snapshots.
+    # ---------------------------------------------------------------------
+    product_scan_interval_seconds: float = 30.0
+    shelf_snapshot_interval_seconds: float = 30.0
+
+    # M15/M30 occupancy thresholds (fraction of the shelf region boxed area
+    # covered by product boxes). Statuses: EMPTY < LOW < MEDIUM < FULL.
+    # Separate from the read-time ShelfIntelligence labels (24h window).
+    shelf_fill_empty_fraction: float = 0.10
+    shelf_fill_low_fraction: float = 0.50
+    shelf_fill_medium_fraction: float = 0.70
+    # A snapshot whose region is >= this fraction overlapped by a tracked
+    # person is marked OCCLUDED; the state is not trusted, waits for retry.
+    shelf_occlusion_overlap_fraction: float = 0.15
 
     # Confidence floor applied after the model's own base threshold.
     confidence_threshold: float = 0.25
@@ -49,17 +88,55 @@ class PipelineConfig:
     # database being flooded with repetitive per-frame rows.
     min_observation_gap_seconds: float = 2.0
 
+    # M29 stable-track filter: a local track must be seen for at least this
+    # many consecutive frames before it is promoted from "candidate" to
+    # "stable". Expensive work (Re-ID association, zone/durable processing,
+    # person-state cache promotion) is gated on stability — a one-frame noise
+    # detection is never counted as a customer. 1 = immediate (backwards
+    # compatible); set higher on noisy streams.
+    stable_track_min_frames: int = 1
+
+    # M29 durable-person storage policy. When True (default, preserves the M13/
+    # M14/M19 camera dashboards), PERSON observations are persisted BUT are
+    # throttled by `min_observation_gap_seconds` AND purged after
+    # PERSON_OBSERVATION_RETENTION_HOURS. When a store prefers cache-only
+    # person analytics, set False: the hot PersonStateManager + journey
+    # aggregates then carry all person analytics and no per-frame PERSON rows
+    # are ever written.
+    person_observation_persistence: bool = True
+
     def validate(self) -> None:
         if self.inference_interval < 1:
             raise ValueError("inference_interval must be >= 1")
         if self.ocr_interval < 0:
             raise ValueError("ocr_interval must be >= 0")
+        if self.product_detector not in ("world", "shelf"):
+            raise ValueError("product_detector must be 'world' or 'shelf'")
         if self.frame_skip < 0:
             raise ValueError("frame_skip must be >= 0")
         if not 0.0 <= self.confidence_threshold <= 1.0:
             raise ValueError("confidence_threshold must be in [0, 1]")
         if self.min_observation_gap_seconds < 0:
             raise ValueError("min_observation_gap_seconds must be >= 0")
+        if self.stable_track_min_frames < 1:
+            raise ValueError("stable_track_min_frames must be >= 1")
+        if self.product_scan_interval_seconds < 0:
+            raise ValueError("product_scan_interval_seconds must be >= 0")
+        if self.shelf_snapshot_interval_seconds < 0:
+            raise ValueError("shelf_snapshot_interval_seconds must be >= 0")
+        if not (
+            0.0
+            <= self.shelf_fill_empty_fraction
+            <= self.shelf_fill_low_fraction
+            <= self.shelf_fill_medium_fraction
+            <= 1.0
+        ):
+            raise ValueError(
+                "shelf fill fractions must be ordered "
+                "empty <= low <= medium <= 1.0"
+            )
+        if not 0.0 <= self.shelf_occlusion_overlap_fraction <= 1.0:
+            raise ValueError("shelf_occlusion_overlap_fraction must be in [0, 1]")
 
 
 @dataclass
@@ -73,6 +150,24 @@ class CameraConfig:
     source: str = "0"
     name: str = "Camera"
     pipelines: PipelineConfig = field(default_factory=PipelineConfig)
+
+    # M27 Phase 19: optional capture-rate cap (frames/sec, 0 = uncapped) so an
+    # operator can trade per-camera FPS for running more cameras on weak CPU.
+    fps_cap: float = 0.0
+
+    # M29: target AI-processing cap (frames/sec, 0 = uncapped). Unlike
+    # fps_cap (which throttles capture), this throttles only the expensive
+    # AI stages by dropping stale frames from the bounded pipeline queue when
+    # the worker is already busy. Capture continues at full FPS, so the live
+    # stream stays fluid even when the AI is the bottleneck.
+    ai_target_fps: float = 0.0
+
+    # Live-preview scale (visualization only — NEVER touches inference). The
+    # MJPEG stream encodes frames downscaled by this factor (0..1, 1 = full
+    # resolution) so many cameras can stream smoothly on weak CPU. Detection
+    # boxes are drawn BEFORE downscaling and the overlay stays normalized.
+    stream_scale: float = 0.5
+    loop: bool = False
 
     # ------------------------------------------------------------------
     # M19 journey additions (all optional for full backward compatibility).
@@ -91,6 +186,13 @@ class CameraConfig:
     # Empty list = default-open (any destination allowed).  Empty dict (not
     # provided) also = default-open.
     next_cameras: List[str] = field(default_factory=list)
+
+    # Manual shelf regions configured by an operator in
+    # `camera.config.shelf_regions` (M15). Forwarded to the runtime so it has
+    # the same view as the read APIs. There is NO shelf-detection model; these
+    # are configured regions, format:
+    # [{"code": str, "label"?: str, "bbox": [x1, y1, x2, y2]}]
+    shelf_regions: List[dict] = field(default_factory=list)
 
     @property
     def device_index(self) -> int | None:

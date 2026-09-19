@@ -103,16 +103,15 @@ export function AlertsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="font-bold">Alerts</h1>
+            <h1 className="font-bold">Things that need attention</h1>
           </div>
           <p className="mt-0.5 text-sm text-black">
-            Actionable intelligence derived from existing AI results.{' '}
-            <span className="font-medium">Informational only</span> — alerts never change
-            stock; they ask a human to review.
+            Low stock, expiring items, empty shelves and camera issues. These
+            are reminders only — they never change your stock by themselves.
           </p>
         </div>
         <Button kind="secondary" onClick={runEvaluate} disabled={evaluating || loading}>
-          {evaluating ? 'Evaluating…' : 'Evaluate now'}
+          {evaluating ? 'Checking…' : 'Check now'}
         </Button>
       </div>
 
@@ -123,24 +122,24 @@ export function AlertsPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat label="Alerts" value={alerts.length} hint="current filter" />
-            <Stat label="Open" value={openCount} tone={openCount ? 'warning' : 'positive'} />
+            <Stat label="Items flagged" value={alerts.length} hint="current filter" />
+            <Stat label="Still open" value={openCount} tone={openCount ? 'warning' : 'positive'} />
             <Stat
-              label="High / Critical"
+              label="Urgent"
               value={highCritical}
               tone={highCritical ? 'danger' : 'default'}
-              hint="business impact severity"
+              hint="needs your attention soon"
             />
             <Stat
-              label="Evaluating"
+              label="Last check"
               value="Now"
-              hint="applies rules over existing intelligence"
+              hint="you can check again anytime"
             />
           </div>
 
           <Card
-            title="Alert inbox"
-            subtitle="Filter, acknowledge, resolve or dismiss. Evidence panel shows the persisted details."
+            title="Attention list"
+            subtitle="Pick one to see the details, then mark it done."
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <AlertFilters

@@ -27,6 +27,8 @@ class EventKind(str, Enum):
     TRACK_ASSOC = "TRACK_ASSOC"
     ZONE_ENTER = "ZONE_ENTER"
     ZONE_EXIT = "ZONE_EXIT"
+    # M30 periodic shelf-occupancy snapshot (one per configured region).
+    SHELF_SNAPSHOT = "SHELF_SNAPSHOT"
 
 
 @dataclass
@@ -37,6 +39,10 @@ class Detection:
     class_name: Optional[str] = None
     confidence: float = 0.0
     bbox_xyxy: list = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
+    # Normalized [x1, y1, x2, y2] in 0..1 (frame-size independent). The live
+    # MJPEG annotator uses pixel `bbox_xyxy`; the frontend overlay prefers this
+    # normalized box so real-camera coordinates render correctly.
+    bbox_norm: Optional[list] = None
     # Anonymous, session-scoped tracking id (people only). Never an identity.
     track_id: Optional[int] = None
 
@@ -63,6 +69,27 @@ class TrackAssocDetection(Detection):
     track_id: Optional[int] = None
     global_person_id: Optional[str] = None
     association_confidence: Optional[str] = None
+
+
+@dataclass
+class ShelfSnapshotPayload:
+    """M30: one shelf region's periodic occupancy snapshot.
+
+    Boundaries are normalized (0..1) so the worker can crop any frame size.
+    `occluded` means a tracked person's box overlapped the region when the
+    snapshot was taken — the operator must NOT trust this fill as official
+    shelf state (the official state is left untouched and retried next scan).
+    """
+
+    shelf_code: str
+    shelf_label: Optional[str] = None
+    region_bbox: Optional[list] = None  # normalized [x1, y1, x2, y2]
+    fill_percentage: float = 0.0
+    status: str = "EMPTY"  # EMPTY / LOW / MEDIUM / FULL
+    product_count: int = 0
+    occluded: bool = False
+    occlusion_note: Optional[str] = None
+    confidence: Optional[float] = None
 
 
 @dataclass
@@ -135,12 +162,14 @@ def person_event(
     global_person_id: Optional[str] = None,
     reid_confidence: Optional[str] = None,
     zone_id: Optional[str] = None,
+    bbox_norm: Optional[list] = None,
 ) -> EdgeEvent:
     person = PersonDetection(
         class_id=0,
         class_name=class_name,
         confidence=confidence,
         bbox_xyxy=bbox_xyxy,
+        bbox_norm=bbox_norm,
         track_id=track_id,
         global_person_id=global_person_id,
         reid_confidence=reid_confidence,
@@ -251,11 +280,13 @@ def product_event(
     confidence: float,
     bbox_xyxy: list,
     source: Optional[str] = None,
+    bbox_norm: Optional[list] = None,
 ) -> EdgeEvent:
     prod = ProductDetection(
         class_name=class_name,
         confidence=confidence,
         bbox_xyxy=bbox_xyxy,
+        bbox_norm=bbox_norm,
     )
     return EdgeEvent(
         kind=EventKind.PRODUCT,
@@ -315,5 +346,25 @@ def expiry_event(
         frame_number=frame_number,
         confidence=confidence,
         payload=parsed,
+        source=source,
+    )
+
+
+def shelf_snapshot_event(
+    *,
+    camera_id: str,
+    frame_number: int,
+    timestamp: datetime,
+    payload: ShelfSnapshotPayload,
+    source: Optional[str] = None,
+) -> EdgeEvent:
+    """Emit a single shelf region's occupancy snapshot (M30)."""
+    return EdgeEvent(
+        kind=EventKind.SHELF_SNAPSHOT,
+        camera_id=camera_id,
+        timestamp=timestamp,
+        frame_number=frame_number,
+        confidence=payload.confidence,
+        payload=payload,
         source=source,
     )

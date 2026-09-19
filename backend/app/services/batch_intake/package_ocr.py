@@ -29,8 +29,8 @@ MAX_IMAGE_BYTES = 15 * 1024 * 1024
 class QualityGateConfig:
     """Pre-OCR minimums for a close-up package photo."""
 
-    min_short_side: int = 480
-    min_long_side: int = 960
+    min_short_side: int = 200
+    min_long_side: int = 200
 
 
 def decode_image_bytes(image_bytes: bytes) -> np.ndarray:
@@ -46,11 +46,36 @@ def decode_image_bytes(image_bytes: bytes) -> np.ndarray:
             f"Image exceeds the {MAX_IMAGE_BYTES // (1024 * 1024)} MB upload limit."
         )
     import cv2
+    import io
 
-    arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    # Use PIL with ImageOps.exif_transpose to ensure smartphone camera photos (portrait EXIF)
+    # are correctly oriented right-side up before text and barcode detection.
+    try:
+        from PIL import Image, ImageOps
+
+        pil_img = Image.open(io.BytesIO(image_bytes))
+        pil_img = ImageOps.exif_transpose(pil_img)
+        if pil_img.mode != "RGB":
+            pil_img = pil_img.convert("RGB")
+        rgb = np.array(pil_img)
+        image = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    except Exception:
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
     if image is None:
         raise ImageDecodeError("Upload is not a decodable image.")
+
+    # Resize oversized phone camera photos (e.g. 12MP-48MP down to max dimension 1200)
+    # to keep high text clarity while preventing CPU inference timeouts (>10-40s).
+    h, w = image.shape[:2]
+    max_dim = max(h, w)
+    if max_dim > 1200:
+        scale = 1200.0 / float(max_dim)
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        image = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
     return image
 
 
@@ -122,7 +147,17 @@ class PackageOCRProcessor:
         """
         notes: List[str] = []
         try:
-            result = self._get_ocr().extract_text(image_bgr)
+            inp = image_bgr
+            if inp is not None and getattr(inp, "ndim", 0) >= 2:
+                h, w = inp.shape[:2]
+                if 0 < min(h, w) < 480:
+                    import cv2
+
+                    scale = 480.0 / float(min(h, w))
+                    new_w = max(1, int(round(w * scale)))
+                    new_h = max(1, int(round(h * scale)))
+                    inp = cv2.resize(inp, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+            result = self._get_ocr().extract_text(inp)
             if result is None:
                 result = _EMPTY_RESULT
         except Exception as exc:  # inference/load failure

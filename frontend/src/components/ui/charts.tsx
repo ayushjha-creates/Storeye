@@ -1,17 +1,18 @@
-// M18: dependency-free SVG charts (line, bar, donut, sparkline). All
-// components are presentational; formatting is left to the caller.
+// M18: dependency-free SVG charts (line, bar, donut, sparkline).
 //
-// Responsive: every chart uses a `viewBox` scaled to width 100% via
-// `h-auto w-full`, so it reflows on any screen size. `showValues` renders the
-// actual data value above each point so numbers are always visible.
+// Responsive: charts measure their container with `useElementWidth` (ResizeObserver)
+// to adapt smoothly to any screen size (mobile, tablet, desktop) without distortion.
+// Interactive: subtle hover tooltips, smooth Bézier curves, and clean micro-interactions.
 
-import React from 'react'
-
-const W = 320
-const PAD_X = 8
+import React, { useId, useState } from 'react'
+import { useElementWidth } from '../../hooks/useElementWidth'
 
 function fmt(v: number): string {
   if (v === 0) return '0'
+  if (Math.abs(v) >= 100000) {
+    const l = v / 100000
+    return `${l % 1 === 0 ? l.toFixed(0) : l.toFixed(1)}L`
+  }
   if (Math.abs(v) >= 1000) {
     const k = v / 1000
     return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}k`
@@ -49,7 +50,7 @@ export function LineChart({
   values,
   labels,
   color = '#3b82f6',
-  height = 140,
+  height = 150,
   showDots = true,
   showValues = true,
   valueTextClass = 'fill-gray-900 tabular',
@@ -72,158 +73,311 @@ export function LineChart({
   dotStroke?: string
   lineShadowY?: number
 }) {
-  const H = height
-  const labelPad = labels ? (labels.length > 8 ? 15 : 25) : 0
-  const valuePad = showValues ? 16 : 0
-  const topPad = 38
-  const leftPad = 26
-  const rightPad = 8
-  const plotW = W - leftPad - rightPad
+  const [containerRef, measuredWidth] = useElementWidth<HTMLDivElement>(480)
+  const [activeIdx, setActiveIdx] = useState<number | null>(null)
+  const gid = useId()
 
-  const rawMax = Math.max(...values)
+  const W = Math.max(300, measuredWidth)
+  const H = height
+  const labelPad = labels ? (labels.length > 8 ? 20 : 28) : 0
+  const valuePad = showValues ? 18 : 0
+  const topPad = 38
+  const leftPad = 32
+  const rightPad = 12
+  const plotW = Math.max(100, W - leftPad - rightPad)
+
+  const rawMax = Math.max(...values, 0)
   const axisMax = niceCeil(rawMax)
   const span = values.length > 1 ? plotW / (values.length - 1) : 0
   const xAt = (i: number) => leftPad + i * span
   const yAt = (v: number) => H - (v / axisMax) * H
   const pts = values.map((v, i) => [xAt(i), yAt(v)] as const)
   const line = smoothLine(pts)
-  const area =
-    `${line} L${pts[pts.length - 1][0].toFixed(1)},${H} L${pts[0][0].toFixed(1)},${H} Z`
-  const gid = React.useId()
+  const lastPt = pts[pts.length - 1] ?? [leftPad, H]
+  const firstPt = pts[0] ?? [leftPad, H]
+  const area = `${line} L${lastPt[0].toFixed(1)},${H} L${firstPt[0].toFixed(1)},${H} Z`
   const peak = values.reduce((pi, v, i, a) => (v > a[pi] ? i : pi), 0)
 
   const condensed = values.length > 8
-  const valueFont = condensed ? 8 : 10.5
-  const labelFont = labels ? (condensed ? 6.5 : 9) : 0
+  const valueFont = condensed ? 8.5 : 10.5
+  const labelFont = labels ? (condensed ? 7 : 9.5) : 0
   const ticks = [0, 0.25, 0.5, 0.75, 1]
 
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (span <= 0 || values.length === 0) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const mouseX = ((e.clientX - rect.left) / rect.width) * W
+    const idx = Math.min(
+      values.length - 1,
+      Math.max(0, Math.round((mouseX - leftPad) / span)),
+    )
+    setActiveIdx(idx)
+  }
+
   return (
-    <svg
-      viewBox={`0 0 ${W} ${topPad + H + valuePad + labelPad}`}
-      role="img"
-      aria-label="line chart"
-      className="h-auto w-full"
-    >
-      <defs>
-        <linearGradient id={`grad-${gid}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
-        </linearGradient>
-        {lineShadowY ? (
-          <filter id={`shadow-${gid}`} x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="2.5" />
-          </filter>
-        ) : null}
-      </defs>
-      <g transform={`translate(0 ${topPad})`}>
-        {ticks.map((f, i) => {
-          const ty = H - f * H
-          return (
-            <g key={i}>
-              <line x1={leftPad} x2={W - rightPad} y1={ty} y2={ty} stroke="#E5E7EB" strokeWidth={1} />
-              <text x={leftPad - 6} y={ty + 2.5} fontSize={7.5} textAnchor="end" fill="#9CA3AF">
-                {fmt(axisMax * f)}
-              </text>
-            </g>
-          )
-        })}
-        <path d={area} fill={`url(#grad-${gid})`} />
-        {lineShadowY ? (
+    <div ref={containerRef} className="w-full select-none" data-testid="line-chart">
+      <svg
+        viewBox={`0 0 ${W} ${topPad + H + valuePad + labelPad}`}
+        role="img"
+        aria-label="line chart"
+        className="block h-auto w-full cursor-crosshair overflow-visible"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setActiveIdx(null)}
+      >
+        <defs>
+          <linearGradient id={`grad-${gid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.22" />
+            <stop offset="60%" stopColor={color} stopOpacity="0.05" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.00" />
+          </linearGradient>
+          {lineShadowY ? (
+            <filter id={`shadow-${gid}`} x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="2.5" />
+            </filter>
+          ) : null}
+        </defs>
+
+        <g transform={`translate(0 ${topPad})`}>
+          {/* Subtle grid horizontal rules */}
+          {ticks.map((f, i) => {
+            const ty = H - f * H
+            return (
+              <g key={i}>
+                <line
+                  x1={leftPad}
+                  x2={W - rightPad}
+                  y1={ty}
+                  y2={ty}
+                  stroke="#e2e8f0"
+                  strokeWidth={1}
+                  strokeDasharray={i === 0 ? undefined : '3 4'}
+                  opacity={i === 0 ? 0.9 : 0.6}
+                />
+                <text
+                  x={leftPad - 8}
+                  y={ty + 3}
+                  fontSize={8}
+                  textAnchor="end"
+                  fill="#94a3b8"
+                  fontWeight={500}
+                  className="tabular"
+                >
+                  {fmt(axisMax * f)}
+                </text>
+              </g>
+            )
+          })}
+
+          {/* Area fill under curve */}
+          <path d={area} fill={`url(#grad-${gid})`} />
+
+          {/* Shadow line (optional) */}
+          {lineShadowY ? (
+            <path
+              d={line}
+              transform={`translate(0 ${lineShadowY})`}
+              fill="none"
+              stroke={color}
+              strokeWidth={4}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray={lineDash}
+              opacity={0.25}
+              filter={`url(#shadow-${gid})`}
+            />
+          ) : null}
+
+          {/* Main line */}
           <path
             d={line}
-            transform={`translate(0 ${lineShadowY})`}
             fill="none"
             stroke={color}
-            strokeWidth={4}
+            strokeWidth={2.4}
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeDasharray={lineDash}
-            opacity={0.35}
-            filter={`url(#shadow-${gid})`}
           />
-        ) : null}
-        <path
-          d={line}
-          fill="none"
-          stroke={color}
-          strokeWidth={2.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeDasharray={lineDash}
-        />
-        {showValues &&
-          values.map((v, i) =>
-            i === peak ? null : (
-              <text
-                key={i}
-                x={pts[i][0]}
-                y={pts[i][1] - 9}
-                fontSize={valueFont}
-                fontWeight={700}
-                textAnchor="middle"
-                className={valueTextClass}
-              >
-                {fmt(v)}
-              </text>
-            ),
-          )}
-        {showDots &&
-          pts.map(([px, py], i) => (
-            <circle key={i} cx={px} cy={py} r={3} fill="#fff" stroke={dotStroke ?? color} strokeWidth={2.2} />
-          ))}
-        {(() => {
-          const [px, py] = pts[peak]
-          const bw = 64
-          const bh = 24
-          const bx = Math.min(Math.max(px - bw / 2, leftPad), W - rightPad - bw)
-          const by = py - bh - 10
-          return (
-            <g key="peak">
-              <circle cx={px} cy={py} r={4.6} fill="#F97316" stroke="#fff" strokeWidth={1.6} />
-              <line x1={px} y1={by + bh} x2={px} y2={py - 4} stroke="#FDBA74" strokeWidth={1} />
-              <rect x={bx} y={by} width={bw} height={bh} rx={6} fill="#fff" stroke="#FED7AA" strokeWidth={1} />
-              <text x={bx + bw / 2} y={by + 9} fontSize={7} textAnchor="middle" fill="#6B7280">
-                Highest sales
-              </text>
-              <text x={bx + bw / 2} y={by + 18.5} fontSize={9.5} fontWeight={800} textAnchor="middle" fill="#111827">
-                {fmt(values[peak])}
-              </text>
-            </g>
-          )
-        })()}
-        {labels?.map((l, i) => {
-          const lx = pts[i][0]
-          const ly = H + valuePad + (condensed ? 8 : 15)
-          const last = i === labels.length - 1
-          const pw = Math.max(l.length * labelFont * 0.62 + (condensed ? 6 : 12), condensed ? 16 : 24)
-          const ph = condensed ? 11 : 15
-          return (
-            <g key={i}>
-              <rect
-                x={lx - pw / 2}
-                y={ly - (condensed ? 6 : 8)}
-                width={pw}
-                height={ph}
-                rx={condensed ? 6 : 8}
-                fill={last ? '#E2E8F0' : '#F3F4F6'}
-                stroke={labelBoxBorder ?? '#e5e7eb'}
-                strokeWidth={1}
+
+          {/* Active / hover hairline indicator */}
+          {activeIdx !== null && pts[activeIdx] && (
+            <g key="active-indicator">
+              <line
+                x1={pts[activeIdx][0]}
+                x2={pts[activeIdx][0]}
+                y1={0}
+                y2={H}
+                stroke={color}
+                strokeWidth={1.2}
+                strokeDasharray="3 3"
+                opacity={0.6}
               />
-              <text
-                x={lx}
-                y={ly}
-                fontSize={labelFont}
-                fontWeight={last ? 700 : 500}
-                textAnchor="middle"
-                className={last ? 'fill-gray-900' : labelTextClass}
-              >
-                {l}
-              </text>
+              <circle
+                cx={pts[activeIdx][0]}
+                cy={pts[activeIdx][1]}
+                r={7}
+                fill={color}
+                fillOpacity={0.18}
+              />
+              <circle
+                cx={pts[activeIdx][0]}
+                cy={pts[activeIdx][1]}
+                r={3.8}
+                fill="#ffffff"
+                stroke={color}
+                strokeWidth={2.5}
+              />
             </g>
-          )
-        })}
-      </g>
-    </svg>
+          )}
+
+          {/* Default static values above points when not hovering */}
+          {showValues &&
+            values.map((v, i) => {
+              if (i === peak || i === activeIdx) return null
+              return (
+                <text
+                  key={i}
+                  x={pts[i][0]}
+                  y={pts[i][1] - 9}
+                  fontSize={valueFont}
+                  fontWeight={600}
+                  textAnchor="middle"
+                  className={valueTextClass}
+                >
+                  {fmt(v)}
+                </text>
+              )
+            })}
+
+          {/* Regular point circles */}
+          {showDots &&
+            pts.map(([px, py], i) => {
+              if (i === activeIdx) return null
+              return (
+                <circle
+                  key={i}
+                  cx={px}
+                  cy={py}
+                  r={3.2}
+                  fill="#ffffff"
+                  stroke={dotStroke ?? color}
+                  strokeWidth={2}
+                  className="transition-transform hover:scale-125"
+                />
+              )
+            })}
+
+          {/* Peak badge callout */}
+          {values[peak] > 0 && activeIdx !== peak && (() => {
+            const [px, py] = pts[peak]
+            const bw = 68
+            const bh = 22
+            const bx = Math.min(Math.max(px - bw / 2, leftPad), W - rightPad - bw)
+            const by = Math.max(py - bh - 9, -topPad + 8)
+            return (
+              <g key="peak">
+                <circle cx={px} cy={py} r={4.6} fill="#f97316" stroke="#ffffff" strokeWidth={1.8} />
+                <line x1={px} y1={by + bh} x2={px} y2={py - 3} stroke="#fdba74" strokeWidth={1} />
+                <rect
+                  x={bx}
+                  y={by}
+                  width={bw}
+                  height={bh}
+                  rx={6}
+                  fill="#ffffff"
+                  stroke="#fed7aa"
+                  strokeWidth={1}
+                  filter="drop-shadow(0 2px 4px rgba(0,0,0,0.06))"
+                />
+                <text x={bx + bw / 2} y={by + 8.5} fontSize={7} textAnchor="middle" fill="#9a3412" fontWeight={600}>
+                  Highest sales
+                </text>
+                <text
+                  x={bx + bw / 2}
+                  y={by + 17.5}
+                  fontSize={9.5}
+                  fontWeight={800}
+                  textAnchor="middle"
+                  fill="#111827"
+                  className="tabular"
+                >
+                  {fmt(values[peak])}
+                </text>
+              </g>
+            )
+          })()}
+
+          {/* Interactive Hover Tooltip */}
+          {activeIdx !== null && pts[activeIdx] && (() => {
+            const [px, py] = pts[activeIdx]
+            const labelText = labels?.[activeIdx] ? `${labels[activeIdx]}: ` : ''
+            const valText = fmt(values[activeIdx])
+            const tipText = `${labelText}${valText}`
+            const bw = Math.max(54, tipText.length * 7.2 + 16)
+            const bh = 24
+            const bx = Math.min(Math.max(px - bw / 2, leftPad), W - rightPad - bw)
+            const by = Math.max(py - bh - 10, -topPad + 6)
+            return (
+              <g key="hover-tip" className="pointer-events-none">
+                <rect
+                  x={bx}
+                  y={by}
+                  width={bw}
+                  height={bh}
+                  rx={6}
+                  fill="#0f172a"
+                  filter="drop-shadow(0 4px 6px rgba(0,0,0,0.15))"
+                />
+                <text
+                  x={bx + bw / 2}
+                  y={by + 15}
+                  fontSize={10}
+                  fontWeight={700}
+                  textAnchor="middle"
+                  fill="#ffffff"
+                  className="tabular"
+                >
+                  {tipText}
+                </text>
+              </g>
+            )
+          })()}
+
+          {/* X-axis date / day label pills */}
+          {labels?.map((l, i) => {
+            const lx = pts[i][0]
+            const ly = H + valuePad + (condensed ? 10 : 16)
+            const last = i === labels.length - 1
+            const isHovered = i === activeIdx
+            const pw = Math.max(l.length * labelFont * 0.62 + (condensed ? 8 : 14), condensed ? 18 : 26)
+            const ph = condensed ? 13 : 17
+            return (
+              <g key={i}>
+                <rect
+                  x={lx - pw / 2}
+                  y={ly - (condensed ? 7 : 9)}
+                  width={pw}
+                  height={ph}
+                  rx={condensed ? 6 : 8}
+                  fill={isHovered ? '#dbeafe' : last ? '#e0f2fe' : '#f8fafc'}
+                  stroke={isHovered ? '#93c5fd' : last ? '#bae6fd' : (labelBoxBorder ?? '#e2e8f0')}
+                  strokeWidth={1}
+                />
+                <text
+                  x={lx}
+                  y={ly + (condensed ? 2 : 2.5)}
+                  fontSize={labelFont}
+                  fontWeight={last || isHovered ? 700 : 500}
+                  textAnchor="middle"
+                  className={last ? 'fill-sky-800' : isHovered ? 'fill-brand-700' : labelTextClass}
+                >
+                  {l}
+                </text>
+              </g>
+            )
+          })}
+        </g>
+      </svg>
+    </div>
   )
 }
 
@@ -238,54 +392,126 @@ export function BarChart({
   height?: number
   showValues?: boolean
 }) {
+  const [containerRef, measuredWidth] = useElementWidth<HTMLDivElement>(360)
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const gid = useId()
+
+  const W = Math.max(260, measuredWidth)
   const H = height
   const max = Math.max(...data.map((d) => d.value), 1)
-  const slot = W / data.length
-  const bw = Math.min(30, slot * 0.55)
-  const valuePad = showValues ? 16 : 0
+  const slot = data.length > 0 ? W / data.length : W
+  const bw = Math.min(36, Math.max(12, slot * 0.55))
+  const valuePad = showValues ? 18 : 0
+
   return (
-    <svg viewBox={`0 0 ${W} ${H + valuePad + 24}`} role="img" aria-label="bar chart" className="h-auto w-full">
-      {[0.5, 1].map((f) => (
-        <line
-          key={f}
-          x1={PAD_X}
-          x2={W - PAD_X}
-          y1={H * f}
-          y2={H * f}
-          stroke="#64748b"
-          strokeOpacity={0.22}
-          strokeDasharray="3 5"
-        />
-      ))}
-      {data.map((d, i) => {
-        const bh = (d.value / max) * H
-        const x = i * slot + (slot - bw) / 2
-        return (
-          <g key={i}>
-            <rect x={x} y={H - bh} width={bw} height={bh} rx={4} fill={color} opacity={0.88} />
-            {showValues && (
-              <text x={x + bw / 2} y={H - bh - 5} fontSize={9} fontWeight={700} textAnchor="middle" className="fill-gray-600 tabular">
-                {fmt(d.value)}
-              </text>
-            )}
-            {!showValues && d.sub && (
-              <text x={x + bw / 2} y={H - bh - 5} fontSize={9} textAnchor="middle" className="fill-gray-400">
-                {d.sub}
-              </text>
-            )}
-            <text
-              x={x + bw / 2}
-              y={H + valuePad + 16}
-              fontSize={9}
-              textAnchor="middle"
-              className="fill-gray-500"
+    <div ref={containerRef} className="w-full select-none" data-testid="bar-chart">
+      <svg
+        viewBox={`0 0 ${W} ${H + valuePad + 28}`}
+        role="img"
+        aria-label="bar chart"
+        className="block h-auto w-full cursor-pointer overflow-visible"
+        onMouseLeave={() => setHoverIndex(null)}
+      >
+        <defs>
+          <linearGradient id={`bar-grad-${gid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.95" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.75" />
+          </linearGradient>
+        </defs>
+
+        {/* Reference guidelines */}
+        {[0.5, 1].map((f) => (
+          <line
+            key={f}
+            x1={8}
+            x2={W - 8}
+            y1={H * f}
+            y2={H * f}
+            stroke="#e2e8f0"
+            strokeWidth={1}
+            strokeDasharray="3 4"
+            opacity={0.7}
+          />
+        ))}
+
+        {data.map((d, i) => {
+          const bh = (d.value / max) * H
+          const x = i * slot + (slot - bw) / 2
+          const isHovered = hoverIndex === i
+          return (
+            <g
+              key={i}
+              onMouseEnter={() => setHoverIndex(i)}
+              className="transition-all duration-150"
             >
-              {d.label}
-            </text>
-          </g>
-        )
-      })}
-    </svg>
+              {/* Soft hover column track */}
+              {isHovered && (
+                <rect
+                  x={i * slot + 2}
+                  y={0}
+                  width={slot - 4}
+                  height={H + 4}
+                  rx={6}
+                  fill={color}
+                  opacity={0.07}
+                />
+              )}
+
+              {/* Bar */}
+              <rect
+                x={x}
+                y={H - bh}
+                width={bw}
+                height={Math.max(3, bh)}
+                rx={Math.min(5, bw / 3)}
+                fill={`url(#bar-grad-${gid})`}
+                opacity={hoverIndex === null || isHovered ? 1 : 0.65}
+                filter={isHovered ? 'drop-shadow(0 2px 6px rgba(0,0,0,0.15))' : undefined}
+                className="transition-all duration-150"
+              />
+
+              {/* Value label */}
+              {showValues && (
+                <text
+                  x={x + bw / 2}
+                  y={H - bh - 6}
+                  fontSize={10}
+                  fontWeight={isHovered ? 800 : 600}
+                  textAnchor="middle"
+                  className="fill-gray-700 tabular transition-colors"
+                >
+                  {fmt(d.value)}
+                </text>
+              )}
+
+              {!showValues && d.sub && (
+                <text
+                  x={x + bw / 2}
+                  y={H - bh - 6}
+                  fontSize={9}
+                  textAnchor="middle"
+                  className="fill-gray-400"
+                >
+                  {d.sub}
+                </text>
+              )}
+
+              {/* X label */}
+              <text
+                x={x + bw / 2}
+                y={H + valuePad + 18}
+                fontSize={9.5}
+                fontWeight={isHovered ? 700 : 500}
+                textAnchor="middle"
+                className={isHovered ? 'fill-gray-900' : 'fill-gray-500'}
+              >
+                {d.label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+    </div>
   )
 }
 
@@ -306,10 +532,25 @@ export function DonutChart({
   const r = (size - thickness) / 2
   const C = 2 * Math.PI * r
   let offset = 0
+
   return (
-    <div className="flex items-center gap-4">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="donut chart">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#1e293b" strokeWidth={thickness} />
+    <div className="flex items-center gap-4 select-none">
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        role="img"
+        aria-label="donut chart"
+        className="block shrink-0"
+      >
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="#f1f5f9"
+          strokeWidth={thickness}
+        />
         {segments.map((s, i) => {
           const len = (Math.max(s.value, 0) / total) * C
           const dash = `${Math.min(len, C)} ${Math.max(C - len, 0)}`
@@ -327,15 +568,32 @@ export function DonutChart({
               strokeDasharray={dash}
               strokeDashoffset={-start}
               transform={`rotate(-90 ${size / 2} ${size / 2})`}
+              className="transition-all duration-300"
             />
           )
         })}
         {centerLabel && (
           <>
-            <text x="50%" y="47%" textAnchor="middle" dominantBaseline="middle" fontSize={Math.max(14, size / 7)} fontWeight={700} className="fill-gray-900 tabular">
+            <text
+              x="50%"
+              y="46%"
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={Math.max(14, size / 6.5)}
+              fontWeight={700}
+              className="fill-gray-900 tabular"
+            >
               {centerValue}
             </text>
-            <text x="50%" y="61%" textAnchor="middle" dominantBaseline="middle" fontSize={8.5} className="fill-gray-400">
+            <text
+              x="50%"
+              y="62%"
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={8.5}
+              fontWeight={500}
+              className="fill-gray-500"
+            >
               {centerLabel}
             </text>
           </>
@@ -356,18 +614,32 @@ export function Sparkline({
   width?: number
   height?: number
 }) {
+  const gid = useId()
   if (values.length < 2) {
-    return <div className="text-xs text-gray-300">–</div>
+    return <div className="text-xs text-gray-400">–</div>
   }
   const min = Math.min(...values)
   const max = Math.max(...values)
   const span = max - min || 1
-  const step = (width - 2) / (values.length - 1)
-  const line = values
-    .map((v, i) => `${i === 0 ? 'M' : 'L'}${(1 + i * step).toFixed(1)},${(height - ((v - min) / span) * (height - 4) - 2).toFixed(1)}`)
-    .join(' ')
+  const step = (width - 4) / (values.length - 1)
+  const pts = values.map(
+    (v, i) => [
+      2 + i * step,
+      height - ((v - min) / span) * (height - 6) - 3,
+    ] as const,
+  )
+  const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+  const area = `${line} L${(width - 2).toFixed(1)},${height} L2,${height} Z`
+
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="sparkline">
+      <defs>
+        <linearGradient id={`spark-${gid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.2" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#spark-${gid})`} />
       <path d={line} fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
@@ -386,9 +658,12 @@ export function MiniProgress({
   return (
     <div className="flex items-center gap-2">
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
-        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+        <div
+          className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${pct}%`, backgroundColor: color }}
+        />
       </div>
-      <span className="text-xs text-gray-400 tabular">
+      <span className="text-xs font-medium text-gray-500 tabular">
         {label ?? `${pct.toFixed(0)}%`}
       </span>
     </div>

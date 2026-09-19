@@ -1,7 +1,7 @@
 """Storeye Customer entity.
 
-Minimal personal data for digital billing. Only necessary fields;
-WhatsApp/SMS delivery is implemented in a later milestone.
+Minimal personal data for digital billing. Only necessary fields.
+SMS bill-receipt delivery (M31) queues against `mobile` at bill time.
 """
 
 from __future__ import annotations

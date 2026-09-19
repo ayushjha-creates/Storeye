@@ -103,3 +103,14 @@ def test_production_environment_is_strict():
 
 def test_strict_startup_flag_forces_strict():
     assert make(STRICT_STARTUP=True).is_strict is True
+
+
+def test_m30_shelf_snapshot_settings_accepted():
+    s = make(SHELF_SNAPSHOT_RETENTION_DAYS=3)
+    assert s.SHELF_SNAPSHOT_RETENTION_DAYS == 3
+    assert s.SHELF_SNAPSHOT_DIR.name == "shelf_snapshots"
+
+
+def test_m30_negative_retention_is_rejected():
+    with pytest.raises(ValidationError, match="SHELF_SNAPSHOT_RETENTION_DAYS"):
+        make(SHELF_SNAPSHOT_RETENTION_DAYS=-1)

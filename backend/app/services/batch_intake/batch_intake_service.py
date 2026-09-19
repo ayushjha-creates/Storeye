@@ -17,7 +17,8 @@ Confirm (ATOMIC, HUMAN-CONFIRMED)
 from __future__ import annotations
 
 import logging
-from typing import Optional, Tuple
+import re
+from typing import List, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -82,6 +83,27 @@ class BatchIntakeService:
         for note in notes:
             parsed.warnings.append(note)
 
+        # Fallback 1: if barcode wasn't decoded optically, check OCR text for GTIN/EAN numeric barcodes
+        if product is None and barcode is None and parsed.raw_text:
+            matched_prod, detected_barcode = self._find_barcode_in_text(
+                parsed.raw_text, store_id=store_id
+            )
+            if matched_prod is not None:
+                product = matched_prod
+                barcode = detected_barcode
+
+        # Fallback 2: if still no product matched, match OCR text to catalog products using ProductNameMatcher
+        if product is None and parsed.raw_text:
+            product = self._match_product_by_ocr_text(
+                parsed.raw_text, store_id=store_id
+            )
+            if product is not None and barcode is None and product.barcode:
+                barcode = DecodedBarcode(
+                    data=product.barcode,
+                    symbology="CATALOG",
+                    confidence=0.90,
+                )
+
         return PackageScan.from_parsed(
             parsed,
             barcode_read=barcode is not None,
@@ -108,6 +130,7 @@ class BatchIntakeService:
         expiry_date_precision: str = BATCH_PRECISION_DAY,
         mrp=None,
         reference: Optional[str] = None,
+        barcode: Optional[str] = None,
     ) -> Tuple[Batch, object]:
         """Commit a shopkeeper-confirmed receipt atomically.
 
@@ -140,6 +163,18 @@ class BatchIntakeService:
 
         normalized_batch_number = BatchService._normalize_batch_number(batch_number)
         try:
+            if barcode and (not product.barcode or not product.barcode.strip()):
+                cleaned_barcode = barcode.strip()
+                existing_with_barcode = (
+                    self.session.query(Product)
+                    .filter(Product.store_id == store_id, Product.barcode == cleaned_barcode)
+                    .first()
+                )
+                if existing_with_barcode is None:
+                    product.barcode = cleaned_barcode
+                    self.session.add(product)
+                    self.session.flush()
+
             batch = None
             if normalized_batch_number is not None:
                 batch = self.inventory.batches.get_batch(
@@ -193,7 +228,46 @@ class BatchIntakeService:
         return reads[0]
 
     def _resolve_product(self, barcode: str, *, store_id):
+        if self.session is None:
+            return None
         query = select(Product).where(Product.barcode == barcode.strip())
         if store_id is not None:
             query = query.where(Product.store_id == store_id)
         return self.session.scalars(query.order_by(Product.name).limit(1)).first()
+
+    def _find_barcode_in_text(
+        self, raw_text: str, *, store_id
+    ) -> Tuple[Optional[Product], Optional[DecodedBarcode]]:
+        tokens = re.findall(r"\b\d{8,14}\b", raw_text)
+        for cand in tokens:
+            prod = self._resolve_product(cand, store_id=store_id)
+            if prod is not None:
+                return prod, DecodedBarcode(
+                    data=cand, symbology="OCR_BARCODE", confidence=0.95
+                )
+        return None, None
+
+    def _match_product_by_ocr_text(
+        self, raw_text: str, *, store_id
+    ) -> Optional[Product]:
+        if self.session is None:
+            return None
+        from ..product.name_matcher import ProductNameMatcher
+
+        query = select(Product)
+        if store_id is not None:
+            query = query.where(Product.store_id == store_id)
+        products = list(self.session.scalars(query).all())
+        if not products:
+            return None
+
+        matcher = ProductNameMatcher.from_products(products)
+        lines = [
+            line.strip() for line in raw_text.splitlines() if len(line.strip()) >= 3
+        ]
+        match = matcher.match_lines(lines)
+        if match is not None:
+            for p in products:
+                if str(p.id) == match.product_id:
+                    return p
+        return None

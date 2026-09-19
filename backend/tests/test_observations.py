@@ -29,6 +29,8 @@ from app.services.observations.errors import ValidationError
 from app.services.product.expiry_parser import ParsedProductMetadata
 from app.services.inventory import BatchService
 from app.services.inventory.errors import EntityNotFoundError
+from app.edge.events import expiry_event, person_event, product_event
+from app.edge.observation_writer import ObservationWriter
 
 pytestmark = pytest.mark.pg
 
@@ -196,9 +198,124 @@ def test_expiry_metadata_observation(db, store, product, camera):
     assert obs.details["warnings"] == ["low contrast"]
 
 
+def test_ocr_expiry_observation_resolves_catalog_product(db, store, product, camera):
+    # The printed name resolves to the catalog product; MRP is read from the
+    # label and the catalog price is attached too. Still an observation only.
+    product.brand = "Observed Brand"
+    product.ai_classes = ["Observed Brand"]
+    db.add(product)
+    db.commit()
+    writer = ObservationWriter(
+        db, store_id=str(store.id), camera_id=str(camera.id), min_gap_seconds=0.0
+    )
+    ev = expiry_event(
+        camera_id=str(camera.id),
+        frame_number=1,
+        timestamp=datetime.now(timezone.utc),
+        raw_text="Observed Product\nEXP 12/09/2027\nMFG 01/01/2026\nMRP 50.00",
+        text_items=[
+            {"text": "Observed Product"},
+            {"text": "EXP 12/09/2027"},
+            {"text": "MFG 01/01/2026"},
+            {"text": "MRP 50.00"},
+        ],
+        expiry={
+            "expiry_date": "2027-09-12",
+            "expiry_date_precision": "day",
+            "manufacturing_date": "2026-01-01",
+            "batch_number": None,
+            "mrp": "50.00",
+            "warnings": [],
+        },
+        confidence=0.9,
+        status="parsed",
+    )
+    assert writer.write([ev]) == 1
+    obs = db.scalars(
+        select(Observation).where(Observation.observation_type == "EXPIRY_METADATA")
+    ).one()
+    assert obs.product_id == product.id
+    assert obs.details["recognized_product_name"] == "Observed Product"
+    assert obs.details["catalog_price"] == "50.00"
+    assert obs.details["expiry_date"] == "2027-09-12"
+    assert obs.details["manufacturing_date"] == "2026-01-01"
+    assert obs.details["mrp"] == "50.00"
+    assert _inv_qty(db, store, product) == 0  # never mutates inventory
+
+
+def test_ocr_expiry_observation_unmatched_label_stays_unattached(db, store, product, camera):
+    writer = ObservationWriter(
+        db, store_id=str(store.id), camera_id=str(camera.id), min_gap_seconds=0.0
+    )
+    ev = expiry_event(
+        camera_id=str(camera.id),
+        frame_number=1,
+        timestamp=datetime.now(timezone.utc),
+        raw_text="SOME UNRELATED PACKAGE\nEXP 12/09/2027",
+        text_items=[{"text": "SOME UNRELATED PACKAGE"}, {"text": "EXP 12/09/2027"}],
+        expiry={"expiry_date": "2027-09-12", "expiry_date_precision": "day"},
+        confidence=0.8,
+        status="parsed",
+    )
+    assert writer.write([ev]) == 1
+    obs = db.scalars(
+        select(Observation).where(Observation.observation_type == "EXPIRY_METADATA")
+    ).one()
+    assert obs.product_id is None
+    assert "recognized_product_name" not in (obs.details or {})
+
+
 # ---------------------------------------------------------------------------
 # 6 & 7. Bounding box and confidence persistence
 # ---------------------------------------------------------------------------
+def test_product_writer_carries_bbox_norm_and_matches_prompt_name(
+    db, store, product, camera
+):
+    """M32: open-vocab PRODUCT events keep a normalized box and resolve to the
+    catalog product by name (not just the explicit class->product map)."""
+    writer = ObservationWriter(
+        db, store_id=str(store.id), camera_id=str(camera.id), min_gap_seconds=0.0
+    )
+    ev = product_event(
+        camera_id=str(camera.id),
+        frame_number=1,
+        timestamp=datetime.now(timezone.utc),
+        class_name="Observed Product",
+        confidence=0.82,
+        bbox_xyxy=[64.0, 32.0, 192.0, 128.0],
+        bbox_norm=[0.125, 0.125, 0.375, 0.5],
+    )
+    assert writer.write([ev]) == 1
+    obs = db.scalars(
+        select(Observation).where(Observation.observation_type == "PRODUCT")
+    ).one()
+    assert obs.details["bbox_norm"] == [0.125, 0.125, 0.375, 0.5]
+    assert obs.product_id == product.id
+    assert obs.details["recognized_product_name"] == "Observed Product"
+    assert _inv_qty(db, store, product) == 0  # informational only
+
+
+def test_person_writer_carries_bbox_norm(db, store, camera):
+    writer = ObservationWriter(
+        db, store_id=str(store.id), camera_id=str(camera.id), min_gap_seconds=0.0
+    )
+    ev = person_event(
+        camera_id=str(camera.id),
+        frame_number=1,
+        timestamp=datetime.now(timezone.utc),
+        track_id=7,
+        confidence=0.9,
+        bbox_xyxy=[1.0, 2.0, 3.0, 4.0],
+        bbox_norm=[0.01, 0.02, 0.03, 0.04],
+    )
+    assert writer.write([ev]) == 1
+    obs = db.scalars(
+        select(Observation).where(Observation.observation_type == "PERSON")
+    ).one()
+    assert obs.details["bbox_norm"] == [0.01, 0.02, 0.03, 0.04]
+    assert obs.track_id == 7
+
+
 def test_bbox_and_confidence_persisted(db, store, camera):
     svc = _obs(db)
     obs = svc.record_text_observation(

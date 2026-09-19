@@ -90,12 +90,12 @@ describe('AlertsPage', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole('heading', { name: /alerts/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /things that need attention/i })).toBeInTheDocument()
     expect(screen.getByText(/possible shortage: lays/i)).toBeInTheDocument()
     expect(screen.getByText(/possible misplacement: maggi/i)).toBeInTheDocument()
-    expect(screen.getAllByText('CRITICAL').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Urgent').length).toBeGreaterThan(0)
     expect(screen.getAllByText('OPEN').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: /evaluate now/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /check now/i })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /acknowledge/i }).length).toBeGreaterThan(0)
   })
 
@@ -171,7 +171,7 @@ describe('AlertsPage', () => {
       </MemoryRouter>,
     )
 
-    await screen.findByRole('heading', { name: /alerts/i })
+await screen.findByRole('heading', { name: /things that need attention/i })
     await userEvent.selectOptions(screen.getByLabelText(/filter by status/i), 'RESOLVED')
 
     expect(
@@ -188,11 +188,11 @@ describe('AlertsPage', () => {
       </MemoryRouter>,
     )
 
-    await userEvent.click(await screen.findByRole('button', { name: /evaluate now/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /check now/i }))
 
     expect(
       fetchMock.mock.calls.some((c) => String(c[0]).includes('/api/alerts/evaluate')),
     ).toBe(true)
-    expect(await screen.findByRole('heading', { name: /alerts/i })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /things that need attention/i })).toBeInTheDocument()
   })
 })

@@ -67,6 +67,12 @@ export function DemoControlCenterPage() {
     `alerts — created ${res.evaluation.alerts_created}, updated ${res.evaluation.alerts_updated}.`
 
   const activate = async (key: DemoScenarioKey) => {
+    if (
+      !window.confirm(
+        `Activate “${key}”? This re-applies deterministic demo data to the demo store only.`,
+      )
+    )
+      return
     setActivating(key)
     setError(null)
     setNotice(null)
@@ -82,6 +88,12 @@ export function DemoControlCenterPage() {
   }
 
   const reset = async () => {
+    if (
+      !window.confirm(
+        'Reset the demo store to the NORMAL_STORE baseline? Only the demo store is affected.',
+      )
+    )
+      return
     setActivating('__reset__')
     setError(null)
     setNotice(null)

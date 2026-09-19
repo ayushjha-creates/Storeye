@@ -3,6 +3,7 @@
 
 import { Badge } from '../ui/Badge'
 import type { AlertSeverity } from '../../lib/api/types'
+import { ALERT_SEVERITY_LABEL } from '../../lib/shop'
 
 function severityTone(severity: AlertSeverity): 'gray' | 'green' | 'amber' | 'red' | 'blue' {
   switch (severity) {
@@ -22,7 +23,7 @@ function severityTone(severity: AlertSeverity): 'gray' | 'green' | 'amber' | 're
 export function AlertSeverityBadge({ severity }: { severity: AlertSeverity }) {
   return (
     <Badge tone={severityTone(severity)}>
-      {severity}
+      {ALERT_SEVERITY_LABEL[severity]}
     </Badge>
   )
 }

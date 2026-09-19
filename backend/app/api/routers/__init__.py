@@ -16,7 +16,9 @@ from . import (
     journeys,
     insights,
     mobile_intake,
+    shelf_snapshots,
 )
+from . import auth
 
 __all__ = [
     "stores",
@@ -39,4 +41,6 @@ __all__ = [
     "journeys",
     "insights",
     "mobile_intake",
+    "shelf_snapshots",
+    "auth",
 ]

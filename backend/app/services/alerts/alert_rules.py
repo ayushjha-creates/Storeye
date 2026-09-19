@@ -8,8 +8,13 @@ RULES (reuse, never re-run inference)
                          and row confidence >= alert_confidence_threshold
     MISPLACEMENT         MisplacementService row (planogram-based foundation; only
                          mapped products on shelves with expectations)
+    SHELF_EMPTY          ShelfIntelligenceRow.detection_status == EMPTY_VISIBLE
+                         (AI sees no visible product) -> CRITICAL "refill ASAP".
+                         Also emitted by the reconciliation run.
     LOW_SHELF_OCCUPANCY  ShelfIntelligenceRow.detection_status == LOW_VISIBLE
-                         (UNKNOWN is NEVER an alert — no evidence)
+                         (visible occupancy at/below half) -> "about to get empty,
+                         refill soon". Also emitted by the reconciliation run.
+                         UNKNOWN is NEVER an alert — no evidence.
     REVIEW_REQUIRED      persisted ReconciliationResult.status == REC_REVIEW in the
                          window (the layer's explicit human-review signal)
     EXPIRY               existing batch expiry date reaching the configured
@@ -41,6 +46,7 @@ from app.models import (
     ALERT_LOW_SHELF_OCCUPANCY,
     ALERT_MISPLACEMENT,
     ALERT_REVIEW_REQUIRED,
+    ALERT_SHELF_EMPTY,
     ALERT_SHORTAGE,
     ALERT_SURPLUS,
     Camera,
@@ -52,6 +58,10 @@ from app.models import (
     SEV_HIGH,
     SEV_LOW,
     SEV_MEDIUM,
+    ShelfSnapshot,
+    STATUS_ACKNOWLEDGED,
+    STATUS_OPEN,
+    STATUS_RESOLVED,
 )
 from app.services.intelligence import (
     COMP_SHORTAGE,
@@ -62,6 +72,7 @@ from app.services.intelligence import (
     ExpiryIntelligence,
     MisplacementService,
     ProductIntelligenceService,
+    SHELF_STATE_EMPTY,
     SHELF_STATE_LOW,
     ShelfIntelligenceService,
 )
@@ -116,7 +127,7 @@ class AlertRuleEngine:
                 svc, result, store_id=store_id, camera_id=camera_id,
                 min_confidence=min_confidence, hours=window,
             )
-            self._evaluate_low_shelf_occupancy(
+            self._evaluate_shelf_fill(
                 svc, result, store_id=store_id, camera_id=camera_id,
                 min_confidence=min_confidence, hours=window,
             )
@@ -132,6 +143,36 @@ class AlertRuleEngine:
                 stale_minutes=camera_stale_minutes,
             )
             # One transaction: alert evaluation is all-or-nothing.
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return result
+
+    def evaluate_shelf_fill(
+        self,
+        *,
+        store_id: UUID,
+        camera_id: Optional[UUID] = None,
+        min_confidence: float = 0.5,
+        hours: int = 24,
+        trigger: str = "alert_evaluate",
+    ) -> AlertRuleResult:
+        """Evaluate ONLY the shelf fill rule (empty / low occupancy).
+
+        Used by `evaluate()` and invoked by the reconciliation run so that
+        "shelf empty / about to get empty" refill alerts are refreshed as a
+        reconciliation outcome. Writes/updates `alerts` rows only — never
+        inventory, batches, bills or sales.
+        """
+        window = min(max(int(hours), 1), 24 * 7)
+        svc = AlertService(self.session)
+        result = AlertRuleResult(store_id=store_id, hours=window)
+        try:
+            self._evaluate_shelf_fill(
+                svc, result, store_id=store_id, camera_id=camera_id,
+                min_confidence=min_confidence, hours=window, trigger=trigger,
+            )
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -247,18 +288,72 @@ class AlertRuleEngine:
             )
             self._tally(result, alert, created)
 
-    def _evaluate_low_shelf_occupancy(self, svc, result, *, store_id, camera_id,
-                                      min_confidence, hours) -> None:
+    def _resolve_refilled_shelf(self, *, store_id: UUID, camera_id: Optional[UUID], shelf_code: str, pct: Optional[float] = None) -> None:
+        stmt = select(Alert).where(
+            Alert.store_id == store_id,
+            Alert.alert_type.in_([ALERT_SHELF_EMPTY, ALERT_LOW_SHELF_OCCUPANCY]),
+            Alert.status.in_([STATUS_OPEN, STATUS_ACKNOWLEDGED]),
+        )
+        if camera_id is not None:
+            stmt = stmt.where(Alert.camera_id == camera_id)
+        for alert in self.session.scalars(stmt):
+            if alert.details and alert.details.get("shelf_code") == shelf_code:
+                alert.status = STATUS_RESOLVED
+                alert.resolved_at = now_utc()
+                alert.resolved_by = "system"
+                alert.notes = f"Shelf refilled: {pct or 100}% filled"
+
+    def _evaluate_shelf_fill(self, svc, result, *, store_id, camera_id,
+                             min_confidence, hours, trigger="alert_evaluate") -> None:
+        """Shelf fill -> refill alerts.
+
+        EMPTY_VISIBLE / EMPTY -> SHELF_EMPTY (CRITICAL, urgent restock needed).
+        LOW_VISIBLE / LOW     -> LOW_SHELF_OCCUPANCY ("half or less, restock soon").
+        NORMAL_VISIBLE / FULL -> auto-resolves active refill alerts for that shelf.
+        UNKNOWN               -> never an alert (no evidence).
+        """
         rows = ShelfIntelligenceService(self.session).shelves(
             store_id=store_id, camera_id=camera_id,
             min_confidence=min_confidence, hours=hours,
         )
+        seen_codes = set()
         for s in rows:
+            seen_codes.add(s.shelf_code)
+            pct = s.occupied_pct if s.occupied_pct is not None else 0.0
+            if s.detection_status in ("NORMAL_VISIBLE",) or (s.occupied_pct is not None and s.occupied_pct > 50.0):
+                self._resolve_refilled_shelf(store_id=store_id, camera_id=s.camera_id, shelf_code=s.shelf_code, pct=pct)
+                continue
             # UNKNOWN means no evidence -> explicitly NEVER an alert.
+            if s.detection_status == SHELF_STATE_EMPTY:
+                details = {
+                    "source": "shelf_intelligence",
+                    "shelf_code": s.shelf_code,
+                    "region_label": s.region_label,
+                    "detection_status": s.detection_status,
+                    "estimated_visible_occupancy": s.estimated_visible_occupancy,
+                    "occupied_pct": pct,
+                    "camera_id": str(s.camera_id) if s.camera_id else None,
+                    "recommended_action": "refill_now",
+                    "trigger": trigger,
+                }
+                title = f"Shelf {s.shelf_code} is empty — urgent restock needed"
+                message = (
+                    f"AI sees no visible product on shelf {s.shelf_code}. Refill as soon as "
+                    "possible. Informational (AI estimate; not stock)."
+                )
+                alert, created = svc._upsert_alert(
+                    store_id=store_id, alert_type=ALERT_SHELF_EMPTY,
+                    severity=SEV_CRITICAL, title=title, message=message,
+                    camera_id=s.camera_id, product_id=None, shelf_id=s.shelf_id,
+                    confidence=s.mean_confidence, source_type="shelf_intelligence",
+                    details=details,
+                )
+                self._tally(result, alert, created)
+                continue
             if s.detection_status != SHELF_STATE_LOW:
                 continue
-            pct = s.occupied_pct if s.occupied_pct is not None else 0
-            severity = SEV_MEDIUM if pct < 15 else SEV_LOW
+            # At/below half full -> refill soon; nearly empty -> higher severity.
+            severity = SEV_HIGH if pct < 15 else SEV_MEDIUM
             details = {
                 "source": "shelf_intelligence",
                 "shelf_code": s.shelf_code,
@@ -267,11 +362,13 @@ class AlertRuleEngine:
                 "estimated_visible_occupancy": s.estimated_visible_occupancy,
                 "occupied_pct": pct,
                 "camera_id": str(s.camera_id) if s.camera_id else None,
+                "recommended_action": "refill_soon",
+                "trigger": trigger,
             }
-            title = f"Shelf {s.shelf_code} occupancy is low"
+            title = f"Shelf {s.shelf_code} is about to get empty — restock soon ({pct}%)"
             message = (
-                f"AI-estimated visible occupancy is {pct}% (informational; not stock). "
-                f"Review stock placement for this shelf."
+                f"AI-estimated visible occupancy is {pct}% — half full or less. "
+                "Refill before it empties. Informational (AI estimate; not stock)."
             )
             alert, created = svc._upsert_alert(
                 store_id=store_id, alert_type=ALERT_LOW_SHELF_OCCUPANCY,
@@ -281,6 +378,69 @@ class AlertRuleEngine:
                 details=details,
             )
             self._tally(result, alert, created)
+
+        # Also inspect direct periodic ShelfSnapshot rows for real-time edge occupancy
+        snap_stmt = select(ShelfSnapshot).where(ShelfSnapshot.store_id == store_id)
+        if camera_id is not None:
+            snap_stmt = snap_stmt.where(ShelfSnapshot.camera_id == camera_id)
+        snap_stmt = snap_stmt.order_by(ShelfSnapshot.shelf_code, ShelfSnapshot.observed_at.desc())
+        seen_snaps = set()
+        for snap in self.session.scalars(snap_stmt):
+            if snap.shelf_code in seen_snaps:
+                continue
+            seen_snaps.add(snap.shelf_code)
+            if snap.occluded:
+                continue
+            fill_pct = float(snap.fill_percentage) if snap.fill_percentage is not None else 0.0
+            if snap.status in ("MEDIUM", "FULL") and fill_pct > 50.0:
+                self._resolve_refilled_shelf(store_id=store_id, camera_id=snap.camera_id, shelf_code=snap.shelf_code, pct=fill_pct)
+                continue
+            if snap.shelf_code in seen_codes:
+                continue
+            if snap.status == "EMPTY" or fill_pct < 10.0:
+                details = {
+                    "source": "shelf_snapshot",
+                    "shelf_code": snap.shelf_code,
+                    "region_label": snap.shelf_label,
+                    "detection_status": "EMPTY_VISIBLE",
+                    "estimated_visible_occupancy": fill_pct / 100.0,
+                    "occupied_pct": fill_pct,
+                    "camera_id": str(snap.camera_id) if snap.camera_id else None,
+                    "recommended_action": "refill_now",
+                    "trigger": trigger,
+                }
+                alert, created = svc._upsert_alert(
+                    store_id=store_id, alert_type=ALERT_SHELF_EMPTY,
+                    severity=SEV_CRITICAL,
+                    title=f"Shelf {snap.shelf_code} is empty — urgent restock needed",
+                    message=f"AI detected that shelf {snap.shelf_code} is empty ({fill_pct}% filled). Urgent restock required to prevent lost sales.",
+                    camera_id=snap.camera_id, product_id=None, shelf_id=None,
+                    confidence=snap.confidence, source_type="shelf_snapshot",
+                    details=details,
+                )
+                self._tally(result, alert, created)
+            elif snap.status == "LOW" or fill_pct <= 50.0:
+                details = {
+                    "source": "shelf_snapshot",
+                    "shelf_code": snap.shelf_code,
+                    "region_label": snap.shelf_label,
+                    "detection_status": "LOW_VISIBLE",
+                    "estimated_visible_occupancy": fill_pct / 100.0,
+                    "occupied_pct": fill_pct,
+                    "camera_id": str(snap.camera_id) if snap.camera_id else None,
+                    "recommended_action": "refill_soon",
+                    "trigger": trigger,
+                }
+                alert, created = svc._upsert_alert(
+                    store_id=store_id, alert_type=ALERT_LOW_SHELF_OCCUPANCY,
+                    severity=SEV_HIGH if fill_pct < 15 else SEV_MEDIUM,
+                    title=f"Shelf {snap.shelf_code} is about to get empty — restock soon ({fill_pct}%)",
+                    message=f"AI-estimated visible fill is {fill_pct}% (half or less). Restock before it runs empty.",
+                    camera_id=snap.camera_id, product_id=None, shelf_id=None,
+                    confidence=snap.confidence, source_type="shelf_snapshot",
+                    details=details,
+                )
+                self._tally(result, alert, created)
 
     def _evaluate_review_required(self, svc, result, *, store_id, camera_id, hours) -> None:
         end = now_utc()

@@ -54,6 +54,7 @@ class BatchConfirmIn(BaseModel):
     expiry_date_precision: str = BATCH_PRECISION_DAY
     mrp: Optional[Decimal] = None
     reference: Optional[str] = None
+    barcode: Optional[str] = None
 
 
 class BatchReceiptRead(BaseModel):

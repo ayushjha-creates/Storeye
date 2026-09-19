@@ -78,8 +78,9 @@ describe('ReportsPage', () => {
     )
 
     expect(await screen.findByRole('heading', { name: /reports & analytics/i })).toBeInTheDocument()
-    expect(screen.getByText('Revenue · 30d')).toBeInTheDocument()
-    expect(screen.getByText('BILL-0001')).toBeInTheDocument()
-    expect(screen.getByText(/sale record\(s\) on file/i)).toBeInTheDocument()
+    // KPIs/bills render only after the parallel data load resolves — await them.
+    expect(await screen.findByText('Revenue · 30d')).toBeInTheDocument()
+    expect(await screen.findByText('BILL-0001')).toBeInTheDocument()
+    expect(await screen.findByText(/sale record\(s\) on file/i)).toBeInTheDocument()
   })
 })

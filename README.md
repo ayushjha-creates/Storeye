@@ -34,16 +34,21 @@ platform.
   every new package photo through the real M17 pipeline with deterministic
   de-duplication, human-confirmed in the same screen. Phone = camera, laptop =
   edge computer.
+- **Authentication & RBAC — local, offline-first:** Argon2id passwords,
+  server-side sessions in HttpOnly cookies, `OWNER`/`MANAGER`/`STAFF` role
+  gating, per-store isolation, and a real sign-in flow in the frontend. No
+  cloud identity provider. See `docs/authentication.md`.
 
 ### Verification
 
-- **Backend:** 413 tests passing (PostgreSQL); `alembic check` clean
-  (`19c835a1a344`). See `docs/backend_test_database.md`.
-- **Frontend:** 121 tests passing; `tsc -b` and `vite build` clean.
+- **Backend:** 440 tests passing (PostgreSQL); `alembic check` clean
+  (`f4a9c0a1b2c3`). See `docs/backend_test_database.md`.
+- **Frontend:** 125 tests passing; `tsc -b` and `vite build` clean.
 - **Docs:** `docs/milestone_22_final_report.md`,
   `docs/milestone_25_mobile_usb_intake.md`, `docs/mobile_usb_intake.md`,
   `docs/final_architecture.md`, `docs/deployment.md`,
-  `docs/privacy_architecture.md`, `docs/milestone_22_integration_audit.md`,
+  `docs/privacy_architecture.md`, `docs/authentication.md`,
+  `docs/milestone_22_integration_audit.md`,
   `docs/final_demo_checklist.md`.
 
 Deterministic demo dataset (`python -m scripts.seed_demo`, reset via

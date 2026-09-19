@@ -174,15 +174,40 @@ class OpenCVSource(CameraSource):
 class VideoFileSource(OpenCVSource):
     """A bounded local video file source (MP4/AVI/...)."""
 
-    def __init__(self, camera_id: str, path: str | Path):
+    def __init__(self, camera_id: str, path: str | Path, loop: bool = False):
         path = Path(path)
         if not path.exists():
             raise CameraError(f"Video file not found: {path}")
         super().__init__(camera_id, str(path), CameraKind.VIDEO_FILE)
+        self.loop = loop
 
     @property
     def path(self) -> str:
         return str(self._source)
+
+    def read(self) -> CameraFrame:
+        if self._cap is None or not self._opened:
+            raise CameraError(f"Camera {self.camera_id} not opened")
+        cv2 = self._import_cv2()
+        ok, frame = self._cap.read()
+        if not ok or frame is None:
+            if self.loop and self._cap is not None:
+                # Rewind and continue looping seamlessly
+                self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, frame = self._cap.read()
+            if not ok or frame is None:
+                raise EndOfStream(f"Cannot read frame from {self.camera_id}")
+        h, w = frame.shape[:2]
+        fps = self._info.fps if self._info else 0.0
+        return CameraFrame(
+            camera_id=self.camera_id,
+            frame_index=self._next_index(),
+            timestamp=self._now(),
+            image=frame,
+            width=w,
+            height=h,
+            fps=fps,
+        )
 
 
 class WebcamSource(OpenCVSource):
@@ -220,7 +245,8 @@ def create_camera_source(config) -> CameraSource:
     """Factory mapping a CameraConfig to a concrete CameraSource."""
     kind = config.kind
     if kind == CameraKind.VIDEO_FILE:
-        return VideoFileSource(config.camera_id, config.source)
+        loop = getattr(config, "loop", False)
+        return VideoFileSource(config.camera_id, config.source, loop=loop)
     if kind == CameraKind.WEBCAM:
         return WebcamSource(config.camera_id, config.device_index or 0)
     if kind == CameraKind.RTSP:

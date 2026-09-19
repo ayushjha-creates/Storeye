@@ -32,8 +32,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..deps import get_db
-from ...models import Insight, STATUS_OPEN, STATUS_ACKNOWLEDGED
+from ..authz import effective_store_id, require_same_store, scoped_get
+from ..deps import get_db, require_role
+from ...core.auth import ROLE_MANAGER
+from ...models import Insight, User, STATUS_OPEN, STATUS_ACKNOWLEDGED
 from ...schemas import (
     InsightEvaluateIn,
     InsightEvaluateResult,
@@ -45,13 +47,6 @@ from ...schemas import (
 from ...services.insights import InsightEngine, StoreHealthService
 
 router = APIRouter(prefix="/insights", tags=["insights"])
-
-
-def _get_or_404(db: Session, insight_id: UUID) -> Insight:
-    insight = db.get(Insight, insight_id)
-    if insight is None:
-        raise HTTPException(status_code=404, detail="Insight not found")
-    return insight
 
 
 def _list_query(
@@ -109,8 +104,10 @@ def list_insights(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Paged insight list with filters. Read-only."""
+    require_same_store(current_user, store_id)
     items, total = _list_query(
         db,
         store_id=store_id,
@@ -128,8 +125,13 @@ def list_insights(
 
 
 @router.get("/summary", response_model=InsightSummary)
-def insights_summary(store_id: UUID, db: Session = Depends(get_db)):
+def insights_summary(
+    store_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
     """Aggregate insight counts for dashboard KPIs."""
+    require_same_store(current_user, store_id)
     rows = db.execute(
         select(Insight.category, Insight.status, Insight.severity, func.count().label("cnt"))
         .where(Insight.store_id == store_id)
@@ -175,10 +177,13 @@ def insights_summary(store_id: UUID, db: Session = Depends(get_db)):
 
 @router.get("/store-health", response_model=StoreHealthMetrics)
 def store_health_endpoint(
-    store_id: UUID, db: Session = Depends(get_db)
+    store_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
     """Categorical store health (HEALTHY/ATTENTION/CRITICAL) with explicit,
     documented evidence (no opaque score)."""
+    require_same_store(current_user, store_id)
     health = StoreHealthService(db).compute(store_id)
     return StoreHealthMetrics(
         store_id=store_id,
@@ -204,7 +209,9 @@ def inventory_insights(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
+    require_same_store(current_user, store_id)
     items, total = _list_query(
         db,
         store_id=store_id,
@@ -227,7 +234,9 @@ def expiry_insights(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
+    require_same_store(current_user, store_id)
     items, total = _list_query(
         db,
         store_id=store_id,
@@ -250,7 +259,9 @@ def customer_flow_insights(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
 ):
+    require_same_store(current_user, store_id)
     items, total = _list_query(
         db,
         store_id=store_id,
@@ -265,9 +276,14 @@ def customer_flow_insights(
 
 
 @router.post("/evaluate", response_model=InsightEvaluateResult)
-def evaluate_insights(payload: InsightEvaluateIn, db: Session = Depends(get_db)):
+def evaluate_insights(
+    payload: InsightEvaluateIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
     """Run the insight rules against EXISTING data (on-demand). Deterministic;
     never runs camera inference; never mutates inventory/batches/sales."""
+    require_same_store(current_user, payload.store_id)
     result = InsightEngine(db).evaluate(
         store_id=payload.store_id,
         reference_date=payload.reference_date,
@@ -280,9 +296,13 @@ def evaluate_insights(payload: InsightEvaluateIn, db: Session = Depends(get_db))
 
 
 @router.get("/{insight_id}", response_model=InsightRead)
-def get_insight(insight_id: UUID, db: Session = Depends(get_db)):
+def get_insight(
+    insight_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("STAFF")),
+):
     """One insight with its full evidence (the 'Why?'). Read-only."""
-    return InsightRead.model_validate(_get_or_404(db, insight_id))
+    return InsightRead.model_validate(scoped_get(db, current_user, Insight, insight_id))
 
 
 def _transition(db: Session, insight: Insight, new_status: str) -> Insight:
@@ -315,15 +335,33 @@ def _transition(db: Session, insight: Insight, new_status: str) -> Insight:
 
 
 @router.post("/{insight_id}/acknowledge", response_model=InsightRead)
-def acknowledge_insight(insight_id: UUID, db: Session = Depends(get_db)):
-    return InsightRead.model_validate(_transition(db, _get_or_404(db, insight_id), "ACKNOWLEDGED"))
+def acknowledge_insight(
+    insight_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
+    return InsightRead.model_validate(
+        _transition(db, scoped_get(db, current_user, Insight, insight_id), "ACKNOWLEDGED")
+    )
 
 
 @router.post("/{insight_id}/resolve", response_model=InsightRead)
-def resolve_insight(insight_id: UUID, db: Session = Depends(get_db)):
-    return InsightRead.model_validate(_transition(db, _get_or_404(db, insight_id), "RESOLVED"))
+def resolve_insight(
+    insight_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
+    return InsightRead.model_validate(
+        _transition(db, scoped_get(db, current_user, Insight, insight_id), "RESOLVED")
+    )
 
 
 @router.post("/{insight_id}/expire", response_model=InsightRead)
-def expire_insight(insight_id: UUID, db: Session = Depends(get_db)):
-    return InsightRead.model_validate(_transition(db, _get_or_404(db, insight_id), "EXPIRED"))
+def expire_insight(
+    insight_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(ROLE_MANAGER)),
+):
+    return InsightRead.model_validate(
+        _transition(db, scoped_get(db, current_user, Insight, insight_id), "EXPIRED")
+    )

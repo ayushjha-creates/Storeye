@@ -201,3 +201,54 @@ def test_raw_text_preserved_for_audit():
 def test_parse_entrypoint_returns_instance():
     from app.services.product.expiry_parser import ParsedProductMetadata
     assert isinstance(parse("EXP 01/02/2026"), ParsedProductMetadata)
+
+
+def test_2_digit_year_mm_yy():
+    r = parse("EXP 05/26\nBATCH BT99\nMRP Rs 20.00")
+    assert r.expiry_date == date(2026, 5, 1)
+    assert r.expiry_date_precision == "month"
+    assert r.batch_number == "BT99"
+    assert r.mrp == Decimal("20.00")
+
+
+def test_relative_expiry_months():
+    r = parse("PKD 15/01/2026\nBEST BEFORE 6 MONTHS FROM PACKAGING\nBATCH PK100")
+    assert r.manufacturing_date == date(2026, 1, 15)
+    assert r.expiry_date == date(2026, 7, 15)
+    assert r.expiry_date_precision == "month"
+    assert r.batch_number == "PK100"
+    assert any("6 months" in w.lower() for w in r.warnings)
+
+
+def test_relative_expiry_days():
+    r = parse("MFD 01/01/2026\nUSE WITHIN 90 DAYS\nLOT L90")
+    assert r.manufacturing_date == date(2026, 1, 1)
+    assert r.expiry_date == date(2026, 4, 1)
+    assert r.expiry_date_precision == "day"
+
+
+def test_pkd_label_variants():
+    r = parse("PKD: 10/05/2026\nEXP: 10/11/2026")
+    assert r.manufacturing_date == date(2026, 5, 10)
+    assert r.expiry_date == date(2026, 11, 10)
+
+
+def test_text_month_dates():
+    r = parse("PKD: 15 OCT 2025\nEXP: 15 OCT 2026\nBATCH: PARLE01\nMRP: 20.00")
+    assert r.manufacturing_date == date(2025, 10, 15)
+    assert r.expiry_date == date(2026, 10, 15)
+    assert r.batch_number == "PARLE01"
+    assert r.mrp == Decimal("20.00")
+
+    r2 = parse("MFD: 10-NOV-25\nEXP: 10-MAY-26")
+    assert r2.manufacturing_date == date(2025, 11, 10)
+    assert r2.expiry_date == date(2026, 5, 10)
+
+    r3 = parse("PKD. 12/JAN/2026\nBEST BEFORE 9 MONTHS")
+    assert r3.manufacturing_date == date(2026, 1, 12)
+    assert r3.expiry_date == date(2026, 10, 12)
+    assert r3.expiry_date_precision == "month"
+
+    r4 = parse("MANUFACTURED: OCT 2025\nUSE BY: 6 MONTHS")
+    assert r4.manufacturing_date == date(2025, 10, 1)
+    assert r4.expiry_date == date(2026, 4, 1)

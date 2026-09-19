@@ -4,6 +4,7 @@ import { Badge } from '../components/ui/Badge'
 import { Card, Stat } from '../components/ui/Card'
 import { ErrorMessage, EmptyState } from '../components/ui/ErrorState'
 import { Spinner } from '../components/ui/Spinner'
+import { BarChart } from '../components/ui/charts'
 import {
   IconRoute,
   IconClock,
@@ -11,10 +12,11 @@ import {
   IconUsers,
   IconTarget,
   IconActivity,
+  IconTrendUp,
 } from '../components/ui/icons'
 import { journeyApi } from '../lib/api/journeys'
 import { storeApi } from '../lib/api/zone'
-import type { JourneyItem, JourneySummary } from '../lib/api/types'
+import type { DailyFootfallPoint, JourneyItem, JourneySummary } from '../lib/api/types'
 
 // Anonymous Customer Journeys (M19).
 //
@@ -33,6 +35,11 @@ function shortId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-6)}` : id
 }
 
+function weekday(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleDateString(undefined, { weekday: 'short' })
+}
+
 const CONFIDENCE_TONE: Record<string, 'green' | 'blue' | 'amber' | 'gray'> = {
   HIGH: 'green',
   MEDIUM: 'blue',
@@ -43,6 +50,8 @@ const CONFIDENCE_TONE: Record<string, 'green' | 'blue' | 'amber' | 'gray'> = {
 export function JourneysPage() {
   const [summary, setSummary] = useState<JourneySummary | null>(null)
   const [journeys, setJourneys] = useState<JourneyItem[]>([])
+  const [footfall, setFootfall] = useState<DailyFootfallPoint[]>([])
+  const [days, setDays] = useState<number>(7)
   const [total, setTotal] = useState(0)
   const [confidence, setConfidence] = useState('')
   const [error, setError] = useState<unknown>(null)
@@ -57,26 +66,29 @@ export function JourneysPage() {
       if (!sid) {
         setSummary(null)
         setJourneys([])
+        setFootfall([])
         setTotal(0)
         return
       }
-      const [sumRes, listRes] = await Promise.all([
+      const [sumRes, listRes, dailyRes] = await Promise.all([
         journeyApi.summary({ store_id: sid }),
         journeyApi.list({
           store_id: sid,
           limit: 200,
           ...(confidence ? { confidence } : {}),
         }),
+        journeyApi.daily({ store_id: sid, days }).catch(() => ({ items: [] })),
       ])
       setSummary(sumRes)
       setJourneys(listRes.items)
+      setFootfall(dailyRes.items ?? [])
       setTotal(listRes.total)
     } catch (err) {
       setError(err)
     } finally {
       setLoading(false)
     }
-  }, [confidence])
+  }, [confidence, days])
 
   useEffect(() => {
     load()
@@ -100,7 +112,7 @@ export function JourneysPage() {
             <select
               value={confidence}
               onChange={(e) => setConfidence(e.target.value)}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-sm text-gray-100 focus:border-brand-500/60 focus:outline-none"
+              className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-sm text-gray-800 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             >
               <option value="">Any</option>
               <option value="HIGH">HIGH</option>
@@ -156,6 +168,73 @@ export function JourneysPage() {
           tone="warning"
         />
       </div>
+
+      {/* Total Footfalls Graph */}
+      {(() => {
+        const footfallTotal = footfall.reduce((sum, p) => sum + p.visitors, 0)
+        const peakPoint = footfall.reduce((max, p) => (p.visitors > (max?.visitors ?? 0) ? p : max), footfall[0])
+        const avgDaily = footfall.length > 0 ? Math.round(footfallTotal / footfall.length) : 0
+        return (
+          <Card
+            title="Total Store Footfalls"
+            subtitle={`Unique visitors counted across all cameras (last ${days} days)`}
+            action={
+              <div className="flex items-center gap-1 text-xs">
+                {([7, 14, 30] as const).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setDays(d)}
+                    className={`rounded px-2.5 py-1 font-medium transition-colors ${
+                      days === d
+                        ? 'bg-brand-600 text-white'
+                        : 'bg-white/[0.06] text-gray-400 hover:bg-white/[0.1] hover:text-white'
+                    }`}
+                  >
+                    {d}D
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            {footfallTotal > 0 ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5 text-base font-bold text-gray-900">
+                      <IconTrendUp className="h-4 w-4 text-emerald-500" />
+                      {footfallTotal}
+                    </span>
+                    <span className="text-gray-500">total visitors over {days} days</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-gray-500">
+                    <span>
+                      Daily Average: <strong className="font-semibold text-gray-900">{avgDaily}</strong>/day
+                    </span>
+                    {peakPoint && peakPoint.visitors > 0 && (
+                      <span>
+                        Busiest Day: <strong className="font-semibold text-gray-900">{weekday(peakPoint.date)}</strong> ({peakPoint.visitors} visitors)
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <BarChart
+                  data={footfall.map((p) => ({
+                    label: weekday(p.date),
+                    value: p.visitors,
+                    sub: String(p.visitors),
+                  }))}
+                  color="#0284c7"
+                />
+              </div>
+            ) : (
+              <EmptyState
+                title="No footfall recorded yet"
+                hint="Footfall appears once people are detected by your store cameras."
+              />
+            )}
+          </Card>
+        )
+      })()}
 
       <Card
         title="Anonymous journeys"

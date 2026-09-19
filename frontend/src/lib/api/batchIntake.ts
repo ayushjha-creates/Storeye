@@ -1,4 +1,4 @@
-import { ApiError, API_BASE, NetworkError, REQUEST_TIMEOUT_MS, request } from './client'
+import { ApiError, API_BASE, CSRF_HEADER, CSRF_VALUE, NetworkError, request } from './client'
 import type { BatchConfirmIn, BatchReceipt, BatchScanResponse } from './types'
 
 /**
@@ -13,7 +13,7 @@ export const batchIntakeApi = {
   scan: async (
     file: File | Blob,
     storeId?: string | null,
-    timeoutMs: number = REQUEST_TIMEOUT_MS * 4,
+    timeoutMs: number = 90_000,
   ): Promise<BatchScanResponse> => {
     const form = new FormData()
     form.append('file', file, file instanceof File ? file.name : 'pack.jpg')
@@ -24,13 +24,21 @@ export const batchIntakeApi = {
     let res: Response
     try {
       // multipart: let the browser set the Content-Type boundary; never JSON.
+      // Always include session cookie and custom CSRF header so authenticated edge node accepts upload.
       res = await fetch(`${API_BASE}/api/batch-intake/scan`, {
         method: 'POST',
+        headers: {
+          [CSRF_HEADER]: CSRF_VALUE,
+        },
+        credentials: 'include',
         body: form,
         signal: controller.signal,
       })
-    } catch {
-      throw new NetworkError()
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error('Package OCR scanning timed out on this device. Please retry or enter details manually.')
+      }
+      throw new NetworkError(err instanceof Error ? err.message : undefined)
     } finally {
       clearTimeout(timer)
     }

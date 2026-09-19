@@ -715,6 +715,43 @@ def test_reset_journeys_deletes_only_target_store(session):
     assert session.get(Observation, obs.id) is not None
 
 
+def test_purge_ghost_visitors_deletes_only_short_sessions(session):
+    from scripts.purge_ghost_visitors import _delete
+
+    store_a = _make_store(session, "ghost-a")
+    store_b = _make_store(session, "ghost-b")
+    cam_a = _make_camera(session, store_a, "entrance")
+    session.commit()
+
+    def _session(store, gid, dur_s):
+        s = GlobalPersonSession(
+            store_id=store.id, global_person_id=gid,
+            first_seen_at=T0, last_seen_at=T0 + timedelta(seconds=dur_s),
+            confidence=CONF_UNKNOWN,
+        )
+        session.add(s)
+        session.flush()
+        session.add(PersonTrackAssociation(
+            store_id=store.id, global_person_id=gid, camera_id=cam_a.id,
+            session_id=s.id, track_id=1, confidence=CONF_UNKNOWN,
+            started_at=s.first_seen_at, last_seen_at=s.last_seen_at,
+        ))
+        return s
+
+    ghost = _session(store_a, "ghost-1", 0.2)   # single-frame blip -> delete
+    real = _session(store_a, "real-1", 100.0)   # real visit -> keep
+    other = _session(store_b, "ghost-2", 0.2)   # different store -> keep
+    session.commit()
+
+    deleted = _delete(session, store_a.id, min_duration_s=1.0)
+    session.commit()
+
+    remaining = session.execute(select(GlobalPersonSession.id)).scalars().all()
+    assert ghost.id not in remaining
+    assert real.id in remaining
+    assert other.id in remaining
+
+
 def test_v_daily_footfall_buckets_sessions_by_utc_day(session):
     store = _make_store(session, "footfall")
     other = _make_store(session, "footfall-other")

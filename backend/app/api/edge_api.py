@@ -182,7 +182,9 @@ def _config_from_camera(
         shelf_occlusion_overlap_fraction=float(
             pid.get("shelf_occlusion_overlap_fraction", 0.15)
         ),
-        stable_track_min_frames=int(pid.get("stable_track_min_frames", 1)),
+        stable_track_min_frames=int(
+    pid.get("stable_track_min_frames", get_settings().PERSON_STABLE_TRACK_MIN_FRAMES)
+),
         person_observation_persistence=bool(
             pid.get("person_observation_persistence", True)
         ),

@@ -116,9 +116,9 @@ verification pending a human:**
 
 **M30 DONE — backend 540 passed / frontend 157 passed; gates green; hardware phase pending:**
 - **Stability gate**: ByteTrack tracks need `stable_track_min_frames` consecutive
-  frames (default 1; runtime/global `PERSON_STABLE_TRACK_MIN_FRAMES`; per-camera
-  value >1 wins) before Re-ID / zone events / journey association — kills
-  one-frame "person journeys".
+  frames (default 5, raised from 1 to filter detector noise; runtime/global
+  `PERSON_STABLE_TRACK_MIN_FRAMES`; per-camera value >1 wins) before Re-ID /
+  zone events / journey association — kills one-frame "person journeys".
 - **Layer-A hot cache**: new `backend/app/edge/person_cache.py` — one store-scoped
   `PersonStateManager` per runtime (LRU+TTL, default 86400s / 2048 entries),
   keyed by opaque `(store_id, global_person_id)`; `resolve_track` before any

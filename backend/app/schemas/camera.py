@@ -187,6 +187,12 @@ def _validate_edge_config(v: Optional[dict[str, Any]]) -> Optional[dict[str, Any
                 raise ValueError(
                     "config.product_detector must be 'world' or 'shelf'"
                 )
+        if "stable_track_min_frames" in _target:
+            _st = _target["stable_track_min_frames"]
+            if not isinstance(_st, int) or isinstance(_st, bool) or _st < 1:
+                raise ValueError(
+                    "config.stable_track_min_frames must be an integer >= 1"
+                )
         if "product_prompts" in _target:
             _prompts = _target["product_prompts"]
             if not isinstance(_prompts, list) or not all(

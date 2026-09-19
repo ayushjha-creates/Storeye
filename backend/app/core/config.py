@@ -181,9 +181,10 @@ class Settings(BaseSettings):
     PERSON_ANALYTICS_RETENTION_DAYS: int = 30
     # A local track must be seen this many CONSECUTIVE frames before expensive
     # person work (Re-ID association, cache promotion, zone/durable events)
-    # runs. 1 = immediate (backwards compatible). Higher values filter one-frame
-    # detector noise on busy/low-res cameras.
-    PERSON_STABLE_TRACK_MIN_FRAMES: int = 1
+    # runs. Default 5 filters single-frame detector noise (motion flicker,
+    # low-res cameras) that previously minted one ghost "visitor" per blip.
+    # A per-camera stable_track_min_frames > 1 wins over this global floor.
+    PERSON_STABLE_TRACK_MIN_FRAMES: int = 5
     # PER-FRAME PERSON observation rows (the M13/M14 camera dashboards depend on
     # these) are throttled by the per-camera min gap AND purged after this many
     # hours. Set False for cache-only person analytics (recommended on very long

@@ -227,6 +227,28 @@ def test_runtime_lifecycle_and_status(tmp_path):
     assert rt.workers() == {}
 
 
+def test_add_camera_applies_global_stable_track_floor():
+    """The PipelineConfig sentinel default (1 = 'follow the global floor') must
+    be replaced by the >1 global threshold at add_camera time, and an explicit
+    per-camera value >1 must survive unchanged."""
+    from app.core.config import get_settings
+
+    rt = EdgeRuntime(registry=FakeRegistry())
+    base = CameraConfig(camera_id="st", kind=CameraKind.VIDEO_FILE, source="nope.mp4",
+                        pipelines=PipelineConfig(person_detection=True))
+    rt.add_camera(base)
+    floor = get_settings().PERSON_STABLE_TRACK_MIN_FRAMES
+    assert floor > 1  # regression guard: 1-frame blips are candidates, not visitors
+    assert rt.get_worker("st").pipeline.config.stable_track_min_frames == floor
+
+    explicit = CameraConfig(camera_id="st2", kind=CameraKind.VIDEO_FILE, source="nope.mp4",
+                            pipelines=PipelineConfig(person_detection=True,
+                                                     stable_track_min_frames=3))
+    rt.add_camera(explicit)
+    assert rt.get_worker("st2").pipeline.config.stable_track_min_frames == 3
+    rt.shutdown()
+
+
 def test_bounded_video_runs_to_eof_and_stops(tmp_path):
     """A short file source runs to EOF, processes every frame, then stops."""
     vid = make_video(os.path.join(str(tmp_path), "eof.mp4"), frames=4, fps=8)

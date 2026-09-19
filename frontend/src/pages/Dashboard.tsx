@@ -74,11 +74,11 @@ function weekday(isoDate: string): string {
 }
 
 function formatDwell(sec: number | null): string {
-  if (sec == null || sec <= 0) return '—'
+  if (sec == null || sec < 1) return '—'
   const m = Math.floor(sec / 60)
   const s = Math.round(sec % 60)
-  if (m === 0) return `${s}s`
-  return `${m}m ${s}s`
+  if (m === 0) return `${Math.max(1, s)}s`
+  return s > 0 ? `${m}m ${s}s` : `${m}m`
 }
 
 type Attention = { id: string; icon: string; text: string; to: string }

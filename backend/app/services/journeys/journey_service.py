@@ -497,10 +497,20 @@ class JourneyService:
             )
         ) or 0
 
-        avg_duration = self.session.scalar(
-            select(func.avg(GlobalPersonSession.last_seen_at - GlobalPersonSession.first_seen_at))
-            .where(GlobalPersonSession.store_id == store_id)
+        avg_base = select(
+            func.avg(
+                GlobalPersonSession.last_seen_at - GlobalPersonSession.first_seen_at
+            )
+        ).where(
+            GlobalPersonSession.store_id == store_id,
+            GlobalPersonSession.last_seen_at > GlobalPersonSession.first_seen_at,
         )
+        if start is not None:
+            avg_base = avg_base.where(GlobalPersonSession.last_seen_at >= start)
+        if end is not None:
+            avg_base = avg_base.where(GlobalPersonSession.first_seen_at <= end)
+
+        avg_duration = self.session.scalar(avg_base)
         duration_seconds = (
             avg_duration.total_seconds() if avg_duration is not None else None
         )

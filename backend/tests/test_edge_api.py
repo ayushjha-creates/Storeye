@@ -309,6 +309,29 @@ def test_config_from_camera_forwards_m30_pipeline_knobs():
     assert cfg.pipelines.shelf_occlusion_overlap_fraction == 0.25
 
 
+def test_config_from_camera_stable_track_uses_global_floor():
+    """M32 clean-up: an unset per-camera stable-track threshold must default to
+    the global floor (>1) so single-frame detector blips never become journeys;
+    an explicit per-camera value >1 still wins."""
+    from uuid import uuid4
+
+    from app.api.edge_api import _config_from_camera
+    from app.core.config import get_settings
+    from app.models import Camera
+
+    floor = get_settings().PERSON_STABLE_TRACK_MIN_FRAMES
+    assert floor > 1  # regression guard: one-frame tracks must stay candidates
+
+    cam = Camera(name="stable-cam", store_id=uuid4(), camera_type="usb", is_active=True)
+    cam.config = {"kind": "usb"}
+    cfg = _config_from_camera(cam)
+    assert cfg.pipelines.stable_track_min_frames == floor
+
+    cam.config = {"kind": "usb", "pipelines": {"stable_track_min_frames": 3}}
+    cfg = _config_from_camera(cam)
+    assert cfg.pipelines.stable_track_min_frames == 3
+
+
 def test_config_from_camera_forwards_product_detector_and_prompts():
     """M32: product model choice + operator prompts reach the runtime."""
     from uuid import uuid4
